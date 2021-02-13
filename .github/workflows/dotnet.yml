@@ -33,7 +33,7 @@ jobs:
       run: dotnet build src --configuration Release --no-restore
 
     - name: Test
-      run: dotnet test src --no-build --verbosity normal
+      run: dotnet test src
 
     - name: Publish Fibula.Scheduling Package
       run: dotnet nuget push "src/Fibula.Scheduling/bin/Release/*.nupkg" --skip-duplicate --api-key ${{ secrets.GITHUB_TOKEN }}
