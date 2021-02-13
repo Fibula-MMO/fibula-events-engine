@@ -14,9 +14,9 @@ namespace Fibula.Scheduling.Tests
     using System;
     using System.Threading;
     using System.Threading.Tasks;
-    using Fibula.Common.TestingUtilities;
     using Fibula.Scheduling;
     using Fibula.Scheduling.Contracts.Abstractions;
+    using Fibula.Utilities.Testing;
     using Microsoft.VisualStudio.TestTools.UnitTesting;
     using Moq;
     using Serilog;
