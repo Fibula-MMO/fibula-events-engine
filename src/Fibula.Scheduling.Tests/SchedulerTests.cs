@@ -17,9 +17,9 @@ namespace Fibula.Scheduling.Tests
     using Fibula.Scheduling;
     using Fibula.Scheduling.Contracts.Abstractions;
     using Fibula.Utilities.Testing;
+    using Microsoft.Extensions.Logging;
     using Microsoft.VisualStudio.TestTools.UnitTesting;
     using Moq;
-    using Serilog;
 
     /// <summary>
     /// Tests for the <see cref="Scheduler"/> class.
@@ -33,9 +33,9 @@ namespace Fibula.Scheduling.Tests
         [TestMethod]
         public void Scheduler_Initialization()
         {
-            Mock<ILogger> loggerMock = new Mock<ILogger>();
-
             ExceptionAssert.Throws<ArgumentNullException>(() => new Scheduler(null), $"Value cannot be null. (Parameter 'logger')");
+
+            Mock<ILogger<Scheduler>> loggerMock = new Mock<ILogger<Scheduler>>();
 
             // use a non default reference time.
             new Scheduler(loggerMock.Object);
@@ -368,9 +368,9 @@ namespace Fibula.Scheduling.Tests
         /// <returns>The scheduler instance.</returns>
         private Scheduler SetupSchedulerWithLoggerMock()
         {
-            Mock<ILogger> schedulerLoggerMock = new Mock<ILogger>();
+            Mock<ILogger<Scheduler>> schedulerLoggerMock = new Mock<ILogger<Scheduler>>();
 
-            schedulerLoggerMock.Setup(l => l.ForContext<Scheduler>()).Returns(schedulerLoggerMock.Object);
+            schedulerLoggerMock.Setup(l => l).Returns(schedulerLoggerMock.Object);
 
             return new Scheduler(schedulerLoggerMock.Object);
         }

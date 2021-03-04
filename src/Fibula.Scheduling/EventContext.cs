@@ -14,7 +14,7 @@ namespace Fibula.Scheduling
     using System;
     using Fibula.Scheduling.Contracts.Abstractions;
     using Fibula.Utilities.Validation;
-    using Serilog;
+    using Microsoft.Extensions.Logging;
 
     /// <summary>
     /// Class that represents an event context.
@@ -35,7 +35,7 @@ namespace Fibula.Scheduling
         {
             logger.ThrowIfNull(nameof(logger));
 
-            this.Logger = logger.ForContext(this.GetType());
+            this.Logger = logger;
             this.getCurrentTime = currentTimeFunc;
         }
 

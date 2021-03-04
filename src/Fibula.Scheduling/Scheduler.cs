@@ -22,8 +22,8 @@ namespace Fibula.Scheduling
     using Fibula.Scheduling.Contracts.Enumerations;
     using Fibula.Scheduling.Contracts.Extensions;
     using Fibula.Utilities.Validation;
+    using Microsoft.Extensions.Logging;
     using Priority_Queue;
-    using Serilog;
 
     /// <summary>
     /// Class that represents a scheduler for events.
@@ -80,11 +80,11 @@ namespace Fibula.Scheduling
         /// Initializes a new instance of the <see cref="Scheduler"/> class.
         /// </summary>
         /// <param name="logger">The logger to use.</param>
-        public Scheduler(ILogger logger)
+        public Scheduler(ILogger<Scheduler> logger)
         {
             logger.ThrowIfNull(nameof(logger));
 
-            this.Logger = logger.ForContext<Scheduler>();
+            this.Logger = logger;
 
             this.eventsAvailableLock = new object();
             this.startTime = this.CurrentTime;
@@ -121,114 +121,116 @@ namespace Fibula.Scheduling
         /// <returns>A <see cref="Task"/> representing the asynchronous processing operation.</returns>
         public Task RunAsync(CancellationToken cancellationToken)
         {
-            return Task.Run(() =>
-            {
-                this.Logger.Debug("Scheduler started.");
-
-                TimeSpan waitForNewTimeOut = TimeSpan.Zero;
-                Stopwatch sw = new Stopwatch();
-
-                long cyclesProcessed = 0;
-                long cycleTimeTotal = 0;
-
-                while (!cancellationToken.IsCancellationRequested)
+            return Task.Run(
+                () =>
                 {
-                    lock (this.eventsAvailableLock)
+                    this.Logger.LogDebug("Scheduler started.");
+
+                    TimeSpan waitForNewTimeOut = TimeSpan.Zero;
+                    Stopwatch sw = new Stopwatch();
+
+                    long cyclesProcessed = 0;
+                    long cycleTimeTotal = 0;
+
+                    while (!cancellationToken.IsCancellationRequested)
                     {
-                        // Wait until we're flagged that there are events available.
-                        // Note that we normalize waitForNewTimeOut to be between Zero and DefaultProcessWaitTime)
-                        if (waitForNewTimeOut < TimeSpan.Zero)
+                        lock (this.eventsAvailableLock)
                         {
-                            // Normalize to zero because the Monitor.Wait() call throws on negative values.
-                            waitForNewTimeOut = TimeSpan.Zero;
-                        }
-                        else if (waitForNewTimeOut > DefaultProcessWaitTime)
-                        {
+                            // Wait until we're flagged that there are events available.
+                            // Note that we normalize waitForNewTimeOut to be between Zero and DefaultProcessWaitTime)
+                            if (waitForNewTimeOut < TimeSpan.Zero)
+                            {
+                                // Normalize to zero because the Monitor.Wait() call throws on negative values.
+                                waitForNewTimeOut = TimeSpan.Zero;
+                            }
+                            else if (waitForNewTimeOut > DefaultProcessWaitTime)
+                            {
+                                waitForNewTimeOut = DefaultProcessWaitTime;
+                            }
+
+                            Monitor.Wait(this.eventsAvailableLock, waitForNewTimeOut);
+
+                            // Then, we reset time to wait and start the stopwatch.
                             waitForNewTimeOut = DefaultProcessWaitTime;
-                        }
+                            sw.Restart();
 
-                        Monitor.Wait(this.eventsAvailableLock, waitForNewTimeOut);
-
-                        // Then, we reset time to wait and start the stopwatch.
-                        waitForNewTimeOut = DefaultProcessWaitTime;
-                        sw.Restart();
-
-                        if (this.priorityQueue.First == null)
-                        {
-                            // no more items on the queue, go to wait.
-                            this.Logger.Warning("Queue empty.");
-                            continue;
-                        }
-
-                        var processTimeAdjustment = cyclesProcessed == 0 ? 0 : cycleTimeTotal / cyclesProcessed++;
-
-                        var priorityDue = this.GetMillisecondsAfterReferenceTime(this.CurrentTime) - processTimeAdjustment;
-
-                        // Check the current queue and fire any events that are due.
-                        while (this.priorityQueue.Count > 0)
-                        {
-                            // The first item always points to the next-in-time event available.
-                            var evt = this.priorityQueue.First;
-                            var isDue = evt.Priority <= priorityDue;
-                            var wasCancelled = this.cancelledEvents.Contains(evt.EventId);
-
-                            // Check if this event has been cancelled or is due.
-                            if (isDue || wasCancelled)
+                            if (this.priorityQueue.First == null)
                             {
-                                // Actually dequeue the event.
-                                this.priorityQueue.Dequeue();
+                                // no more items on the queue, go to wait.
+                                this.Logger.LogWarning("Queue empty.");
+                                continue;
+                            }
 
-                                if (!wasCancelled)
+                            var processTimeAdjustment = cyclesProcessed == 0 ? 0 : cycleTimeTotal / cyclesProcessed++;
+
+                            var priorityDue = this.GetMillisecondsAfterReferenceTime(this.CurrentTime) - processTimeAdjustment;
+
+                            // Check the current queue and fire any events that are due.
+                            while (this.priorityQueue.Count > 0)
+                            {
+                                // The first item always points to the next-in-time event available.
+                                var evt = this.priorityQueue.First;
+                                var isDue = evt.Priority <= priorityDue;
+                                var wasCancelled = this.cancelledEvents.Contains(evt.EventId);
+
+                                // Check if this event has been cancelled or is due.
+                                if (isDue || wasCancelled)
                                 {
-                                    this.Logger.Verbose($"Firing {evt.GetType().Name} with id {evt.EventId}, at {priorityDue}.");
+                                    // Actually dequeue the event.
+                                    this.priorityQueue.Dequeue();
 
-                                    this.EventFired?.Invoke(this, new EventFiredEventArgs(evt));
-                                }
-
-                                // Clean the processed event.
-                                this.CleanUp(evt, evt.RequestorId);
-
-                                // And clean up the expedition and delay hooks.
-                                evt.Expedited -= this.HandleEventExpedition;
-                                evt.Delayed -= this.HandleEventDelay;
-
-                                // Repeat the event if it applicable.
-                                if (!wasCancelled)
-                                {
-                                    if (evt.RepeatAfter != TimeSpan.MinValue)
+                                    if (!wasCancelled)
                                     {
-                                        // Schedule event protects against negative delays.
-                                        this.ScheduleEvent(evt, evt.RepeatAfter);
+                                        this.Logger.LogTrace($"Firing {evt.GetType().Name} with id {evt.EventId}, at {priorityDue}.");
+
+                                        this.EventFired?.Invoke(this, new EventFiredEventArgs(evt));
                                     }
-                                    else
+
+                                    // Clean the processed event.
+                                    this.CleanUp(evt, evt.RequestorId);
+
+                                    // And clean up the expedition and delay hooks.
+                                    evt.Expedited -= this.HandleEventExpedition;
+                                    evt.Delayed -= this.HandleEventDelay;
+
+                                    // Repeat the event if it applicable.
+                                    if (!wasCancelled)
                                     {
-                                        evt.Complete();
+                                        if (evt.RepeatAfter != TimeSpan.MinValue)
+                                        {
+                                            // Schedule event protects against negative delays.
+                                            this.ScheduleEvent(evt, evt.RepeatAfter);
+                                        }
+                                        else
+                                        {
+                                            evt.Complete();
+                                        }
                                     }
                                 }
+                                else
+                                {
+                                    // The next item is in the future, so figure out how long to wait, update and break.
+                                    waitForNewTimeOut = TimeSpan.FromMilliseconds(evt.Priority < priorityDue ? 0 : evt.Priority - priorityDue);
+                                    break;
+                                }
                             }
-                            else
-                            {
-                                // The next item is in the future, so figure out how long to wait, update and break.
-                                waitForNewTimeOut = TimeSpan.FromMilliseconds(evt.Priority < priorityDue ? 0 : evt.Priority - priorityDue);
-                                break;
-                            }
+
+                            sw.Stop();
+
+                            cycleTimeTotal += sw.ElapsedMilliseconds;
                         }
 
-                        sw.Stop();
+                        while (this.eventSchedulingQueue.TryDequeue(out (IEvent Event, DateTimeOffset RequestedAt, TimeSpan Delay) requestedEvent))
+                        {
+                            var updatedDelay = requestedEvent.Delay - (this.CurrentTime - requestedEvent.RequestedAt);
 
-                        cycleTimeTotal += sw.ElapsedMilliseconds;
+                            this.ScheduleEvent(requestedEvent.Event, updatedDelay);
+                        }
                     }
 
-                    while (this.eventSchedulingQueue.TryDequeue(out (IEvent Event, DateTimeOffset RequestedAt, TimeSpan Delay) requestedEvent))
-                    {
-                        var updatedDelay = requestedEvent.Delay - (this.CurrentTime - requestedEvent.RequestedAt);
-
-                        this.ScheduleEvent(requestedEvent.Event, updatedDelay);
-                    }
-                }
-
-                this.Logger.Debug("Scheduler finished.");
-            });
+                    this.Logger.LogDebug("Scheduler finished.");
+                },
+                cancellationToken);
         }
 
         /// <summary>
@@ -263,7 +265,7 @@ namespace Fibula.Scheduling
                     {
                         if (this.CancelEvent(evt))
                         {
-                            this.Logger.Verbose($"Cancelled {specificType.Name} with id {evt.EventId}.");
+                            this.Logger.LogTrace($"Cancelled {specificType.Name} with id {evt.EventId}.");
                         }
                     }
                 }
@@ -310,7 +312,7 @@ namespace Fibula.Scheduling
         {
             eventToSchedule.ThrowIfNull(nameof(eventToSchedule));
 
-            if (!(eventToSchedule is BaseEvent castedEvent))
+            if (eventToSchedule is not BaseEvent castedEvent)
             {
                 throw new ArgumentException($"Argument must be of type {nameof(BaseEvent)}.", nameof(eventToSchedule));
             }
@@ -354,20 +356,20 @@ namespace Fibula.Scheduling
 
                 if (this.priorityQueue.Count == this.maxQueueNodes)
                 {
-                    this.Logger.Warning($"Queue is at capacity ({this.maxQueueNodes}), doubling the size of the queue before scheduling...");
+                    this.Logger.LogWarning($"Queue is at capacity ({this.maxQueueNodes}), doubling the size of the queue before scheduling...");
 
                     // double the max queue size and resize it.
                     this.maxQueueNodes *= 2;
                     this.priorityQueue.Resize(this.maxQueueNodes);
 
-                    this.Logger.Warning($"Resized queue max size to {this.maxQueueNodes}.");
+                    this.Logger.LogWarning($"Resized queue max size to {this.maxQueueNodes}.");
                 }
 
                 this.priorityQueue.Enqueue(castedEvent, milliseconds);
 
                 castedEvent.State = EventState.Scheduled;
 
-                this.Logger.Verbose($"Scheduled {eventToSchedule.GetType().Name} with id {eventToSchedule.EventId}, due in {delayTime.Value} (at {targetTime.ToUnixTimeMilliseconds()}).");
+                this.Logger.LogTrace($"Scheduled {eventToSchedule.GetType().Name} with id {eventToSchedule.EventId}, due in {delayTime.Value} (at {targetTime.ToUnixTimeMilliseconds()}).");
 
                 // check and add event attribution to the requestor
                 if (castedEvent.RequestorId > 0)
@@ -393,7 +395,7 @@ namespace Fibula.Scheduling
         {
             evt.ThrowIfNull(nameof(evt));
 
-            if (!(evt is BaseEvent castedEvent))
+            if (evt is not BaseEvent castedEvent)
             {
                 throw new ArgumentException($"Argument must be of type {nameof(BaseEvent)}.", nameof(evt));
             }
@@ -424,7 +426,7 @@ namespace Fibula.Scheduling
         /// <param name="sender">The event that was expedited.</param>
         private bool HandleEventExpedition(IEvent sender)
         {
-            if (sender == null || !(sender is BaseEvent evt))
+            if (sender == null || sender is not BaseEvent evt)
             {
                 return false;
             }
@@ -456,7 +458,7 @@ namespace Fibula.Scheduling
         /// <param name="delayByTime">The time by which to delay the event.</param>
         private bool HandleEventDelay(IEvent sender, TimeSpan delayByTime)
         {
-            if (sender == null || !(sender is BaseEvent evt))
+            if (sender == null || sender is not BaseEvent evt)
             {
                 return false;
             }

@@ -12,7 +12,7 @@
 namespace Fibula.Scheduling.Contracts.Abstractions
 {
     using System;
-    using Serilog;
+    using Microsoft.Extensions.Logging;
 
     /// <summary>
     /// Interface for an operation context.

@@ -19,7 +19,7 @@
     <PackageProjectUrl>https://fibula-mmo.github.io/</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Fibula-MMO/fibula-scheduling</RepositoryUrl>
     <RepositoryType>GitHub</RepositoryType>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <NeutralLanguage>en</NeutralLanguage>
     <Description>Contains Abstractions for the scheduling framework used in the Fibula project.</Description>
   </PropertyGroup>
@@ -42,7 +42,7 @@
 
   <ItemGroup>
     <PackageReference Include="Fibula.Utilities.Validation" Version="1.1.0" />
-    <PackageReference Include="Serilog" Version="2.10.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="5.0.0" />
     <PackageReference Include="StyleCop.Analyzers" Version="1.1.118">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
