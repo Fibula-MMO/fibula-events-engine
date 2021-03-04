@@ -370,8 +370,6 @@ namespace Fibula.Scheduling.Tests
         {
             Mock<ILogger<Scheduler>> schedulerLoggerMock = new Mock<ILogger<Scheduler>>();
 
-            schedulerLoggerMock.Setup(l => l).Returns(schedulerLoggerMock.Object);
-
             return new Scheduler(schedulerLoggerMock.Object);
         }
 
