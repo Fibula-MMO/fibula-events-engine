@@ -47,12 +47,12 @@ namespace Fibula.Scheduling.Tests
             ExceptionAssert.Throws<ArgumentNullException>(() => new Scheduler(null, null), "Value cannot be null. (Parameter 'logger')");
             ExceptionAssert.Throws<ArgumentNullException>(() => new Scheduler(loggerMock.Object, null), "Value cannot be null. (Parameter 'schedulerOptions')");
 
-            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, noEventRoundByOptions), "At least one validation error found for SchedulerOptions:\r\n  1) An event round-by milliseconds must be specified");
-            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, roundTimeBelowRangeOptions), "At least one validation error found for SchedulerOptions:\r\n  1) The specified event round-by milliseconds must be between 50 and 1000.");
-            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, roundTimeAboveRangeOptions), "At least one validation error found for SchedulerOptions:\r\n  1) The specified event round-by milliseconds must be between 50 and 1000.");
-            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, waitTimeBelowRangeOptions), "At least one validation error found for SchedulerOptions:\r\n  1) The specified maximum time to wait for events must be between 5 seconds and 30 minutes.");
-            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, waitTimeAboveRangeOptions), "At least one validation error found for SchedulerOptions:\r\n  1) The specified maximum time to wait for events must be between 5 seconds and 30 minutes.");
-            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, startingQueueSizeBelowRangeOptions), "At least one validation error found for SchedulerOptions:\r\n  1) The starting queue size must be between 64 and 2147483647.");
+            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, noEventRoundByOptions), $"At least one validation error found for SchedulerOptions:{Environment.NewLine}  1) An event round-by milliseconds must be specified");
+            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, roundTimeBelowRangeOptions), $"At least one validation error found for SchedulerOptions:{Environment.NewLine}  1) The specified event round-by milliseconds must be between 50 and 1000.");
+            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, roundTimeAboveRangeOptions), $"At least one validation error found for SchedulerOptions:{Environment.NewLine}  1) The specified event round-by milliseconds must be between 50 and 1000.");
+            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, waitTimeBelowRangeOptions), $"At least one validation error found for SchedulerOptions:{Environment.NewLine}  1) The specified maximum time to wait for events must be between 5 seconds and 30 minutes.");
+            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, waitTimeAboveRangeOptions), $"At least one validation error found for SchedulerOptions:{Environment.NewLine}  1) The specified maximum time to wait for events must be between 5 seconds and 30 minutes.");
+            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, startingQueueSizeBelowRangeOptions), $"At least one validation error found for SchedulerOptions:{Environment.NewLine}  1) The starting queue size must be between 64 and 2147483647.");
 
             // use a non default reference time.
             new Scheduler(loggerMock.Object, goodOptions);
