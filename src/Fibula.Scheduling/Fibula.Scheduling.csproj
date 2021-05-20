@@ -19,7 +19,7 @@
     <PackageProjectUrl>https://fibula-mmo.github.io/</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Fibula-MMO/fibula-scheduling</RepositoryUrl>
     <RepositoryType>GitHub</RepositoryType>
-    <Version>1.1.2</Version>
+    <Version>1.1.3</Version>
     <NeutralLanguage>en</NeutralLanguage>
     <Description>Contains implementations for the scheduling framework used in the Fibula project.</Description>
   </PropertyGroup>
