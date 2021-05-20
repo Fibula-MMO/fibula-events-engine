@@ -23,6 +23,7 @@ namespace Fibula.Scheduling
     using Fibula.Scheduling.Contracts.Extensions;
     using Fibula.Utilities.Validation;
     using Microsoft.Extensions.Logging;
+    using Microsoft.Extensions.Options;
     using Priority_Queue;
 
     /// <summary>
@@ -31,14 +32,15 @@ namespace Fibula.Scheduling
     public class Scheduler : IScheduler
     {
         /// <summary>
-        /// The default processing wait time on the processing queue thread.
+        /// The maximum number of nodes that the internal queue can hold.
         /// </summary>
-        private static readonly TimeSpan DefaultProcessWaitTime = TimeSpan.FromSeconds(5);
+        /// <remarks>Arbitrarily chosen, resize happens as needed doubling each time, but also costs double time and space each time.</remarks>
+        private const int DefaultQueueSize = 64;
 
         /// <summary>
-        /// The time span to round time by when scheduling.
+        /// The default processing wait time on the processing queue thread.
         /// </summary>
-        private static readonly TimeSpan TimeToRoundBy = TimeSpan.FromMilliseconds(20);
+        private static readonly TimeSpan DefaultQueueProcessWaitTime = TimeSpan.FromSeconds(5);
 
         /// <summary>
         /// The start time of the scheduler.
@@ -71,24 +73,41 @@ namespace Fibula.Scheduling
         private readonly object eventsAvailableLock;
 
         /// <summary>
-        /// The maximum number of nodes that the internal queue can hold.
+        /// The time to round events target time by.
         /// </summary>
-        /// <remarks>Arbitrarily chosen, resize happens as needed doubling each time, but also costs double time and space each time.</remarks>
-        private int maxQueueNodes = 64;
+        private readonly TimeSpan timeToRoundBy;
+
+        /// <summary>
+        /// The maximum time for a queue check to wait.
+        /// </summary>
+        private readonly TimeSpan maximumQueueWaitTime;
+
+        /// <summary>
+        /// The current size of the queue.
+        /// </summary>
+        private int queueCapacity;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="Scheduler"/> class.
         /// </summary>
         /// <param name="logger">The logger to use.</param>
-        public Scheduler(ILogger<Scheduler> logger)
+        /// <param name="schedulerOptions">The options for the scheduler.</param>
+        public Scheduler(ILogger<Scheduler> logger, IOptions<SchedulerOptions> schedulerOptions)
         {
             logger.ThrowIfNull(nameof(logger));
+            schedulerOptions.ThrowIfNull(nameof(schedulerOptions));
+
+            DataAnnotationsValidator.ValidateObjectRecursive(schedulerOptions.Value);
 
             this.Logger = logger;
 
+            this.queueCapacity = schedulerOptions.Value.StartingQueueSize ?? DefaultQueueSize;
+            this.maximumQueueWaitTime = schedulerOptions.Value.MaximumWaitTime ?? DefaultQueueProcessWaitTime;
+
             this.eventsAvailableLock = new object();
             this.startTime = this.CurrentTime;
-            this.priorityQueue = new StablePriorityQueue<BaseEvent>(this.maxQueueNodes);
+            this.priorityQueue = new StablePriorityQueue<BaseEvent>(this.queueCapacity);
+            this.timeToRoundBy = TimeSpan.FromMilliseconds(schedulerOptions.Value.EventRoundByMilliseconds.Value);
             this.eventSchedulingQueue = new ConcurrentQueue<(IEvent evt, DateTimeOffset requestTime, TimeSpan requestedDelay)>();
             this.cancelledEvents = new HashSet<string>();
             this.eventsIndexedByRequestor = new Dictionary<uint, ISet<BaseEvent>>();
@@ -143,15 +162,15 @@ namespace Fibula.Scheduling
                                 // Normalize to zero because the Monitor.Wait() call throws on negative values.
                                 waitForNewTimeOut = TimeSpan.Zero;
                             }
-                            else if (waitForNewTimeOut > DefaultProcessWaitTime)
+                            else if (waitForNewTimeOut > DefaultQueueProcessWaitTime)
                             {
-                                waitForNewTimeOut = DefaultProcessWaitTime;
+                                waitForNewTimeOut = DefaultQueueProcessWaitTime;
                             }
 
                             Monitor.Wait(this.eventsAvailableLock, waitForNewTimeOut);
 
                             // Then, we reset time to wait and start the stopwatch.
-                            waitForNewTimeOut = DefaultProcessWaitTime;
+                            waitForNewTimeOut = DefaultQueueProcessWaitTime;
                             sw.Restart();
 
                             if (this.priorityQueue.First == null)
@@ -354,15 +373,15 @@ namespace Fibula.Scheduling
                     castedEvent.Cancelled += this.HandleEventCancellation;
                 }
 
-                if (this.priorityQueue.Count == this.maxQueueNodes)
+                // When the queue reaches capacity, resize it to double it's size.
+                if (this.priorityQueue.Count == this.queueCapacity)
                 {
-                    this.Logger.LogWarning($"Queue is at capacity ({this.maxQueueNodes}), doubling the size of the queue before scheduling...");
+                    this.Logger.LogWarning($"Queue is at capacity ({this.queueCapacity}), doubling the size of the queue before scheduling...");
 
-                    // double the max queue size and resize it.
-                    this.maxQueueNodes *= 2;
-                    this.priorityQueue.Resize(this.maxQueueNodes);
+                    this.queueCapacity *= 2;
+                    this.priorityQueue.Resize(this.queueCapacity);
 
-                    this.Logger.LogWarning($"Resized queue max size to {this.maxQueueNodes}.");
+                    this.Logger.LogWarning($"Resized queue max size to {this.queueCapacity}.");
                 }
 
                 this.priorityQueue.Enqueue(castedEvent, milliseconds);
@@ -492,7 +511,7 @@ namespace Fibula.Scheduling
         /// <returns>The milliseconds value.</returns>
         private long GetMillisecondsAfterReferenceTime(DateTimeOffset dateTime)
         {
-            return Convert.ToInt64((dateTime - this.startTime).Round(TimeToRoundBy).TotalMilliseconds);
+            return Convert.ToInt64((dateTime - this.startTime).Round(this.timeToRoundBy).TotalMilliseconds);
         }
 
         /// <summary>

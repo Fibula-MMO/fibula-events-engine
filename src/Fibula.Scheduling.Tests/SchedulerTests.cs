@@ -12,12 +12,14 @@
 namespace Fibula.Scheduling.Tests
 {
     using System;
+    using System.ComponentModel.DataAnnotations;
     using System.Threading;
     using System.Threading.Tasks;
     using Fibula.Scheduling;
     using Fibula.Scheduling.Contracts.Abstractions;
     using Fibula.Utilities.Testing;
     using Microsoft.Extensions.Logging;
+    using Microsoft.Extensions.Options;
     using Microsoft.VisualStudio.TestTools.UnitTesting;
     using Moq;
 
@@ -33,12 +35,27 @@ namespace Fibula.Scheduling.Tests
         [TestMethod]
         public void Scheduler_Initialization()
         {
-            ExceptionAssert.Throws<ArgumentNullException>(() => new Scheduler(null), $"Value cannot be null. (Parameter 'logger')");
-
             Mock<ILogger<Scheduler>> loggerMock = new Mock<ILogger<Scheduler>>();
+            IOptions<SchedulerOptions> goodOptions = Options.Create(new SchedulerOptions() { EventRoundByMilliseconds = 50 });
+            IOptions<SchedulerOptions> noEventRoundByOptions = Options.Create(new SchedulerOptions());
+            IOptions<SchedulerOptions> roundTimeBelowRangeOptions = Options.Create(new SchedulerOptions() { EventRoundByMilliseconds = 49 });
+            IOptions<SchedulerOptions> roundTimeAboveRangeOptions = Options.Create(new SchedulerOptions() { EventRoundByMilliseconds = 1001 });
+            IOptions<SchedulerOptions> waitTimeBelowRangeOptions = Options.Create(new SchedulerOptions() { EventRoundByMilliseconds = 50, MaximumWaitTime = TimeSpan.FromSeconds(4) });
+            IOptions<SchedulerOptions> waitTimeAboveRangeOptions = Options.Create(new SchedulerOptions() { EventRoundByMilliseconds = 50, MaximumWaitTime = TimeSpan.FromMinutes(31) });
+            IOptions<SchedulerOptions> startingQueueSizeBelowRangeOptions = Options.Create(new SchedulerOptions() { EventRoundByMilliseconds = 50, StartingQueueSize = 63 });
+
+            ExceptionAssert.Throws<ArgumentNullException>(() => new Scheduler(null, null), "Value cannot be null. (Parameter 'logger')");
+            ExceptionAssert.Throws<ArgumentNullException>(() => new Scheduler(loggerMock.Object, null), "Value cannot be null. (Parameter 'schedulerOptions')");
+
+            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, noEventRoundByOptions), "At least one validation error found for SchedulerOptions:\r\n  1) An event round-by milliseconds must be specified");
+            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, roundTimeBelowRangeOptions), "At least one validation error found for SchedulerOptions:\r\n  1) The specified event round-by milliseconds must be between 50 and 1000.");
+            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, roundTimeAboveRangeOptions), "At least one validation error found for SchedulerOptions:\r\n  1) The specified event round-by milliseconds must be between 50 and 1000.");
+            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, waitTimeBelowRangeOptions), "At least one validation error found for SchedulerOptions:\r\n  1) The specified maximum time to wait for events must be between 5 seconds and 30 minutes.");
+            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, waitTimeAboveRangeOptions), "At least one validation error found for SchedulerOptions:\r\n  1) The specified maximum time to wait for events must be between 5 seconds and 30 minutes.");
+            ExceptionAssert.Throws<ValidationException>(() => new Scheduler(loggerMock.Object, startingQueueSizeBelowRangeOptions), "At least one validation error found for SchedulerOptions:\r\n  1) The starting queue size must be between 64 and 2147483647.");
 
             // use a non default reference time.
-            new Scheduler(loggerMock.Object);
+            new Scheduler(loggerMock.Object, goodOptions);
         }
 
         /// <summary>
@@ -369,8 +386,9 @@ namespace Fibula.Scheduling.Tests
         private Scheduler SetupSchedulerWithLoggerMock()
         {
             Mock<ILogger<Scheduler>> schedulerLoggerMock = new Mock<ILogger<Scheduler>>();
+            IOptions<SchedulerOptions> goodOptions = Options.Create(new SchedulerOptions() { EventRoundByMilliseconds = 50 });
 
-            return new Scheduler(schedulerLoggerMock.Object);
+            return new Scheduler(schedulerLoggerMock.Object, goodOptions);
         }
 
         /// <summary>

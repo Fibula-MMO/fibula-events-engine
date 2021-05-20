@@ -19,7 +19,7 @@
     <PackageProjectUrl>https://fibula-mmo.github.io/</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Fibula-MMO/fibula-scheduling</RepositoryUrl>
     <RepositoryType>GitHub</RepositoryType>
-    <Version>1.1.1</Version>
+    <Version>1.1.2</Version>
     <NeutralLanguage>en</NeutralLanguage>
     <Description>Contains implementations for the scheduling framework used in the Fibula project.</Description>
   </PropertyGroup>
@@ -37,6 +37,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Options" Version="5.0.0" />
     <PackageReference Include="OptimizedPriorityQueue" Version="5.0.0" />
     <PackageReference Include="StyleCop.Analyzers" Version="1.1.118">
       <PrivateAssets>all</PrivateAssets>
