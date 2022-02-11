@@ -1,5 +1,5 @@
 ﻿// -----------------------------------------------------------------
-// <copyright file="EventCompletedDelegate.cs" company="2Dudes">
+// <copyright file="IEventExecutionContext.cs" company="2Dudes">
 // Copyright (c) | Jose L. Nunez de Caceres et al.
 // https://linkedin.com/in/nunezdecaceres
 //
@@ -9,13 +9,17 @@
 // </copyright>
 // -----------------------------------------------------------------
 
-namespace Fibula.Scheduling.Contracts.Delegates
-{
-    using Fibula.Scheduling.Contracts.Abstractions;
+namespace Fibula.EventsEngine.Contracts.Abstractions;
 
+using Microsoft.Extensions.Logging;
+
+/// <summary>
+/// Interface for the execution context in events.
+/// </summary>
+public interface IEventExecutionContext
+{
     /// <summary>
-    /// Delegate to call when an event is processed to completion (after no more repeats).
+    /// Gets a reference to the logger in use.
     /// </summary>
-    /// <param name="evt">The event that was completed.</param>
-    public delegate void EventCompletedDelegate(IEvent evt);
+    ILogger Logger { get; }
 }

@@ -18,7 +18,7 @@ jobs:
       uses: actions/setup-dotnet@v1
       with:
         # SDK Version to use; x will use the latest version of the 5.0 channel
-        dotnet-version: 5.0.x
+        dotnet-version: 6.0.x
         # Authenticates packages to push to GPR
         source-url: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
       env:
@@ -35,10 +35,10 @@ jobs:
     - name: Test
       run: dotnet test src
 
-    - name: Publish Fibula.Scheduling Package
-      run: dotnet nuget push "src/Fibula.Scheduling/bin/Release/*.nupkg" --skip-duplicate --api-key ${{ secrets.GITHUB_TOKEN }}
+    - name: Publish Fibula.EventsEngine Package
+      run: dotnet nuget push "src/Fibula.EventsEngine/bin/Release/*.nupkg" --skip-duplicate --api-key ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Publish Fibula.Scheduling.Contracts Package
-      run: dotnet nuget push "src/Fibula.Scheduling.Contracts/bin/Release/*.nupkg" --skip-duplicate --api-key ${{ secrets.GITHUB_TOKEN }}
+    - name: Publish Fibula.EventsEngine.Contracts Package
+      run: dotnet nuget push "src/Fibula.EventsEngine.Contracts/bin/Release/*.nupkg" --skip-duplicate --api-key ${{ secrets.GITHUB_TOKEN }}
 
       

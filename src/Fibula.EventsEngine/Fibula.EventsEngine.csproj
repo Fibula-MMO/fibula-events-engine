@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net5.0</TargetFramework>
+    <TargetFramework>net6.0</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <DebugType>full</DebugType>
@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <PackageId>Fibula.Scheduling</PackageId>
+    <PackageId>Fibula.EventsEngine</PackageId>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <Copyright>2020</Copyright>
@@ -17,11 +17,11 @@
     <Company>The Fibula Project</Company>
     <Product>Fibula MMO</Product>
     <PackageProjectUrl>https://fibula-mmo.github.io/</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/Fibula-MMO/fibula-scheduling</RepositoryUrl>
+    <RepositoryUrl>https://github.com/Fibula-MMO/fibula-events-engine</RepositoryUrl>
     <RepositoryType>GitHub</RepositoryType>
-    <Version>1.1.3</Version>
+    <Version>1.0.0</Version>
     <NeutralLanguage>en</NeutralLanguage>
-    <Description>Contains implementations for the scheduling framework used in the Fibula project.</Description>
+    <Description>Contains implementations for the events engine framework used in the Fibula project.</Description>
   </PropertyGroup>
 
   <ItemGroup>
@@ -37,9 +37,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Options" Version="5.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="5.0.0" />
-    <PackageReference Include="OptimizedPriorityQueue" Version="5.0.0" />
+    <PackageReference Include="Fibula.Utilities.Common" Version="1.1.1" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="6.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="6.0.0" />
     <PackageReference Include="StyleCop.Analyzers" Version="1.1.118">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -47,7 +47,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Fibula.Scheduling.Contracts\Fibula.Scheduling.Contracts.csproj" />
+    <ProjectReference Include="..\Fibula.EventsEngine.Contracts\Fibula.EventsEngine.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

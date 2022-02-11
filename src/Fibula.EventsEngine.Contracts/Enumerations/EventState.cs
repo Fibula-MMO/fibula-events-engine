@@ -9,31 +9,36 @@
 // </copyright>
 // -----------------------------------------------------------------
 
-namespace Fibula.Scheduling.Contracts.Enumerations
+namespace Fibula.EventsEngine.Contracts.Enumerations
 {
     /// <summary>
-    /// Enumerates all the possible event states.
+    /// Enumerates all the possible states for an event.
     /// </summary>
     public enum EventState
     {
         /// <summary>
-        /// The event has not been scheduled yet.
+        /// The starting state of events.
         /// </summary>
         Created,
 
         /// <summary>
-        /// The event has been scheduled and is waiting to be executed.
+        /// The event has been enqueued and is waiting to be executed.
         /// </summary>
-        Scheduled,
+        InQueue,
 
         /// <summary>
-        /// The event was cancelled.
+        /// The event has been cancelled.
         /// </summary>
         Cancelled,
 
         /// <summary>
-        /// The event was processed to completion.
+        /// The event is being executed.
         /// </summary>
-        Completed,
+        Executing,
+
+        /// <summary>
+        /// The event has been executed.
+        /// </summary>
+        Executed,
     }
 }

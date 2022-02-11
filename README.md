@@ -1,8 +1,8 @@
-# Fibula MMO - Scheduling Framework
+# Fibula MMO - Events Engine Framework
 
-![.NET](https://github.com/fibula-mmo/fibula-scheduling/workflows/.NET/badge.svg)
+![.NET](https://github.com/fibula-mmo/fibula-events-engine/workflows/.NET/badge.svg)
 
-Contains the abstractions and implementation for the scheduling framework over at [the Fibula MMO project](https://github.com/fibula-mmo).
+Contains the abstractions and implementation for the events engine framework over at [the Fibula MMO project](https://github.com/fibula-mmo).
 
 ---
 
