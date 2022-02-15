@@ -123,7 +123,7 @@ public class EventsReactorTests
         const int ExpectedCounterValueAfterRun = 1;
 
         TimeSpan twoSecondsTimeSpan = TimeSpan.FromSeconds(2);
-        TimeSpan overheadDelay = TimeSpan.FromMilliseconds(100);
+        TimeSpan overheadDelay = TimeSpan.FromMilliseconds(500);
 
         BaseEvent eventWithNoDelay = Mock.Of<BaseEvent>();
         BaseEvent eventWithDelay = Mock.Of<BaseEvent>();
@@ -156,17 +156,17 @@ public class EventsReactorTests
         // start the reactor.
         Task reactorTask = reactor.RunAsync(cts.Token);
 
-        // push an event with a delay of some seconds.
-        reactor.Push(eventWithDelay, twoSecondsTimeSpan);
-
-        // delay for 100 ms (to account for setup overhead and multi threading) and check that the counter has NOT gone up for delayed events.
         await Task.Delay(overheadDelay).ContinueWith(prev =>
+        {
+            // push an event with no delay.
+            reactor.Push(eventWithNoDelay);
+
+            // push an event with a delay of some seconds.
+            reactor.Push(eventWithDelay, twoSecondsTimeSpan);
+        }).ContinueWith(prev =>
         {
             Assert.AreEqual(ExpectedCounterValueBeforeRun, delayedEventFiredCounter, $"Delayed events counter does not match: Expected {ExpectedCounterValueBeforeRun}, got {delayedEventFiredCounter}.");
         });
-
-        // push an event with no delay.
-        reactor.Push(eventWithNoDelay);
 
         // delay for 500 ms and check that the counter has gone up.
         await Task.Delay(overheadDelay).ContinueWith(prev =>
@@ -188,7 +188,7 @@ public class EventsReactorTests
     private EventsReactor SetupReactorWithConsoleLogger()
     {
         using var logFactory = LoggerFactory.Create(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Trace));
-        IOptions<EventsReactorOptions> goodOptions = Options.Create(new EventsReactorOptions() { EventRoundByMilliseconds = 500 });
+        IOptions<EventsReactorOptions> goodOptions = Options.Create(new EventsReactorOptions() { EventRoundByMilliseconds = 100 });
 
         var logger = logFactory.CreateLogger<EventsReactor>();
 
