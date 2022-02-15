@@ -19,7 +19,7 @@
     <PackageProjectUrl>https://fibula-mmo.github.io/</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Fibula-MMO/fibula-events-engine</RepositoryUrl>
     <RepositoryType>GitHub</RepositoryType>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <NeutralLanguage>en</NeutralLanguage>
     <Description>Contains abstractions for the events engine framework used in the Fibula project.</Description>
   </PropertyGroup>

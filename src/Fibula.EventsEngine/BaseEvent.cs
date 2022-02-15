@@ -46,18 +46,18 @@ public abstract class BaseEvent : IEvent, IEquatable<BaseEvent>
     public bool ExcludeFromTelemetry { get; protected set; }
 
     /// <summary>
-    /// Gets or sets the event's state.
+    /// Gets the event's state.
     /// </summary>
-    public EventState State { get; set; }
+    public EventState State { get; internal set; }
 
     /// <summary>
-    /// Gets or sets the time at which the event is expected to be processed, if any.
+    /// Gets the time at which the event is expected to be processed, if any.
     /// </summary>
     /// <remarks>
     /// The event is only expected to have a value here if it is in the
     /// <see cref="EventState.InQueue"/> or <see cref="EventState.Executed"/> states.
     /// </remarks>
-    public DateTimeOffset? NextExecutionTime { get; set; }
+    public DateTimeOffset? NextExecutionTime { get; internal set; }
 
     /// <summary>
     /// Executes the event logic.

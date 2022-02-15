@@ -35,18 +35,18 @@ public interface IEvent
     bool ExcludeFromTelemetry { get; }
 
     /// <summary>
-    /// Gets or sets the event's state.
+    /// Gets the event's state.
     /// </summary>
-    EventState State { get; set; }
+    EventState State { get; }
 
     /// <summary>
-    /// Gets or sets the time at which the event is expected to be processed, if any.
+    /// Gets the time at which the event is expected to be processed, if any.
     /// </summary>
     /// <remarks>
     /// The event is only expected to have a value here if it is in the
     /// <see cref="EventState.InQueue"/> or <see cref="EventState.Executed"/> states.
     /// </remarks>
-    DateTimeOffset? NextExecutionTime { get; set; }
+    DateTimeOffset? NextExecutionTime { get; }
 
     /// <summary>
     /// Executes the event logic.

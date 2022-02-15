@@ -12,10 +12,12 @@
 namespace Fibula.EventsEngine.Tests;
 
 using System;
+using System.ComponentModel.DataAnnotations;
 using System.Threading;
 using System.Threading.Tasks;
 using Fibula.Utilities.Testing;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 
@@ -32,12 +34,21 @@ public class EventsReactorTests
     public void EventsReactor_Initialization()
     {
         var loggerMock = Mock.Of<ILogger<EventsReactor>>();
+        IOptions<EventsReactorOptions> goodOptions = Options.Create(new EventsReactorOptions() { EventRoundByMilliseconds = 50 });
+        IOptions<EventsReactorOptions> noEventRoundByOptions = Options.Create(new EventsReactorOptions());
+        IOptions<EventsReactorOptions> roundTimeBelowRangeOptions = Options.Create(new EventsReactorOptions() { EventRoundByMilliseconds = 49 });
+        IOptions<EventsReactorOptions> roundTimeAboveRangeOptions = Options.Create(new EventsReactorOptions() { EventRoundByMilliseconds = 1001 });
 
         // Supplying no logger instance should throw.
-        ExceptionAssert.Throws<ArgumentNullException>(() => new EventsReactor(null), "Value cannot be null. (Parameter 'logger')");
+        ExceptionAssert.Throws<ArgumentNullException>(() => new EventsReactor(null, null), "Value cannot be null. (Parameter 'logger')");
+        ExceptionAssert.Throws<ArgumentNullException>(() => new EventsReactor(loggerMock, null), "Value cannot be null. (Parameter 'reactorOptions')");
+
+        ExceptionAssert.Throws<ValidationException>(() => new EventsReactor(loggerMock, noEventRoundByOptions), $"At least one validation error found for EventsReactorOptions:{Environment.NewLine}  1) An event round-by milliseconds must be specified");
+        ExceptionAssert.Throws<ValidationException>(() => new EventsReactor(loggerMock, roundTimeBelowRangeOptions), $"At least one validation error found for EventsReactorOptions:{Environment.NewLine}  1) The specified event round-by milliseconds must be between 50 and 1000.");
+        ExceptionAssert.Throws<ValidationException>(() => new EventsReactor(loggerMock, roundTimeAboveRangeOptions), $"At least one validation error found for EventsReactorOptions:{Environment.NewLine}  1) The specified event round-by milliseconds must be between 50 and 1000.");
 
         // use a non default reference time.
-        new EventsReactor(loggerMock);
+        new EventsReactor(loggerMock, goodOptions);
     }
 
     /// <summary>
@@ -177,9 +188,10 @@ public class EventsReactorTests
     private EventsReactor SetupReactorWithConsoleLogger()
     {
         using var logFactory = LoggerFactory.Create(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Trace));
+        IOptions<EventsReactorOptions> goodOptions = Options.Create(new EventsReactorOptions() { EventRoundByMilliseconds = 500 });
 
         var logger = logFactory.CreateLogger<EventsReactor>();
 
-        return new EventsReactor(logger);
+        return new EventsReactor(logger, goodOptions);
     }
 }

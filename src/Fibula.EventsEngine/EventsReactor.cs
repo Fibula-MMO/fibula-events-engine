@@ -12,7 +12,6 @@
 namespace Fibula.EventsEngine;
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -21,8 +20,10 @@ using System.Threading.Tasks;
 using Fibula.EventsEngine.Contracts.Abstractions;
 using Fibula.EventsEngine.Contracts.Delegates;
 using Fibula.EventsEngine.Contracts.Enumerations;
+using Fibula.Utilities.Common.Extensions;
 using Fibula.Utilities.Validation;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Class that represents a scheduler for events.
@@ -42,22 +43,27 @@ public class EventsReactor : IEventsReactor
     /// <summary>
     /// The internal queue used to feed events to the loop.
     /// </summary>
-    private readonly LinkedList<IEvent> eventsQueue;
+    private readonly LinkedList<EventsNode> eventsQueue;
 
     /// <summary>
     /// Internal queue to handle asynchronous event demultiplexing.
     /// </summary>
-    private readonly ConcurrentQueue<(IEvent evt, DateTimeOffset requestTime, TimeSpan requestedDelay)> eventDemultiplexingQueue;
+    private readonly Queue<(BaseEvent evt, DateTimeOffset requestTime, TimeSpan requestedDelay)> eventDemultiplexingQueue;
 
     /// <summary>
     /// A mapping of events to their Ids for O(1) lookup.
     /// </summary>
-    private readonly Dictionary<Guid, IEvent> eventsIndex;
+    private readonly Dictionary<Guid, BaseEvent> eventsIndex;
+
+    /// <summary>
+    /// The time to round events target time by.
+    /// </summary>
+    private readonly TimeSpan timeToRoundBy;
 
     /// <summary>
     /// Tracks the median node in the events queue.
     /// </summary>
-    private LinkedListNode<IEvent> medianNode;
+    private LinkedListNode<EventsNode> medianNode;
 
     /// <summary>
     /// Tracks the balance in the median, which is a measure of how many nodes
@@ -69,18 +75,23 @@ public class EventsReactor : IEventsReactor
     /// Initializes a new instance of the <see cref="EventsReactor"/> class.
     /// </summary>
     /// <param name="logger">The logger to use.</param>
-    public EventsReactor(ILogger<EventsReactor> logger)
+    /// <param name="reactorOptions">The options for the reactor.</param>
+    public EventsReactor(ILogger<EventsReactor> logger, IOptions<EventsReactorOptions> reactorOptions)
     {
         logger.ThrowIfNull(nameof(logger));
+        reactorOptions.ThrowIfNull(nameof(reactorOptions));
+
+        DataAnnotationsValidator.ValidateObjectRecursive(reactorOptions.Value);
 
         this.Logger = logger;
 
         this.eventsAvailableLock = new object();
         this.eventsPushedLock = new object();
 
-        this.eventsQueue = new LinkedList<IEvent>();
-        this.eventDemultiplexingQueue = new ConcurrentQueue<(IEvent evt, DateTimeOffset requestTime, TimeSpan requestedDelay)>();
-        this.eventsIndex = new Dictionary<Guid, IEvent>();
+        this.eventsQueue = new LinkedList<EventsNode>();
+        this.eventDemultiplexingQueue = new Queue<(BaseEvent evt, DateTimeOffset requestTime, TimeSpan requestedDelay)>();
+        this.eventsIndex = new Dictionary<Guid, BaseEvent>();
+        this.timeToRoundBy = TimeSpan.FromMilliseconds(reactorOptions.Value.EventRoundByMilliseconds.Value);
         this.medianNode = null;
         this.medianBalance = 0;
     }
@@ -112,7 +123,7 @@ public class EventsReactor : IEventsReactor
     /// <returns>True if the event was successfully cancelled, and false otherwise.</returns>
     public bool Cancel(Guid evtId)
     {
-        if (!this.eventsIndex.TryGetValue(evtId, out IEvent evt))
+        if (!this.eventsIndex.TryGetValue(evtId, out BaseEvent evt))
         {
             this.Logger.LogTrace($"An event with id {evtId} was not found in the index.");
 
@@ -131,6 +142,11 @@ public class EventsReactor : IEventsReactor
     {
         eventToPush.ThrowIfNull(nameof(eventToPush));
 
+        if (!(eventToPush is BaseEvent baseEvent))
+        {
+            throw new ArgumentException($"This reactor can only accept events derived from {nameof(BaseEvent)}");
+        }
+
         if (delayBy == null || delayBy < TimeSpan.Zero)
         {
             delayBy = TimeSpan.Zero;
@@ -138,7 +154,7 @@ public class EventsReactor : IEventsReactor
 
         lock (this.eventsPushedLock)
         {
-            this.eventDemultiplexingQueue.Enqueue((eventToPush, CurrentTime, delayBy.Value));
+            this.eventDemultiplexingQueue.Enqueue((baseEvent, CurrentTime, delayBy.Value));
 
             this.Logger.LogTrace($"Pushed event {eventToPush.GetType().Name} with id {eventToPush.Id} for demultiplexing.");
 
@@ -168,6 +184,7 @@ public class EventsReactor : IEventsReactor
             {
                 this.Logger.LogDebug("Events reactor processing loop started.");
 
+                // Max timeout accepted in Monitor.Wait is 2^31 - 1 milliseconds.
                 var maxTimeout = TimeSpan.FromMilliseconds(int.MaxValue);
                 var waitForNewTimeOut = TimeSpan.Zero;
                 var sw = new Stopwatch();
@@ -189,14 +206,13 @@ public class EventsReactor : IEventsReactor
                         Monitor.Wait(this.eventsAvailableLock, waitForNewTimeOut);
 
                         // Then, we reset time to wait and start the stopwatch.
-                        // Max timeout accepted in Monitor.Wait is 2^31 - 1 milliseconds.
                         waitForNewTimeOut = maxTimeout;
                         sw.Restart();
 
                         if (this.eventsQueue.First == null)
                         {
                             // no more items on the queue, go to wait.
-                            this.Logger.LogWarning("The events queue is empty.");
+                            this.Logger.LogWarning("The event processing loop was woken up but the events queue was empty.");
                             continue;
                         }
 
@@ -208,36 +224,38 @@ public class EventsReactor : IEventsReactor
                         while (this.eventsQueue.Any())
                         {
                             // The first item always points to the next-in-time event available.
-                            var nextEvent = this.eventsQueue.First.ValueRef;
+                            var nextEvents = this.eventsQueue.First.ValueRef;
                             var projectedCompletionTime = CurrentTime + TimeSpan.FromMilliseconds(avgProcessingTime);
-                            var timeDifference = nextEvent.NextExecutionTime.Value - projectedCompletionTime;
+                            var timeDifference = nextEvents.TargetTime - projectedCompletionTime;
                             var isDue = timeDifference <= TimeSpan.Zero;
-                            var wasCancelled = nextEvent.State == EventState.Cancelled;
 
-                            // Check if this event has been cancelled or is due.
-                            // If so, we need to dump it, or process it, respectively.
-                            if (isDue || wasCancelled)
+                            // Check if these events node is due.
+                            if (isDue)
                             {
                                 // Actually dequeue the event.
                                 this.DequeueEvent();
 
-                                if (!wasCancelled)
+                                foreach (var baseEvt in nextEvents.Events)
                                 {
-                                    this.Logger.LogTrace($"Event {nextEvent.GetType().Name} with id {nextEvent.Id}, marked ready at {CurrentTime}.");
+                                    if (baseEvt.State != EventState.Cancelled)
+                                    {
+                                        this.Logger.LogTrace($"Event {nextEvents.GetType().Name} with id {baseEvt.Id}, marked ready at {CurrentTime}.");
 
-                                    nextEvent.State = EventState.Executing;
+                                        baseEvt.State = EventState.Executing;
 
-                                    this.EventReady?.Invoke(this, new EventReadyEventArgs(nextEvent));
+                                        this.EventReady?.Invoke(this, new EventReadyEventArgs(baseEvt));
 
-                                    nextEvent.State = EventState.Executed;
+                                        baseEvt.State = EventState.Executed;
+                                        baseEvt.NextExecutionTime = null;
+                                    }
+                                    else
+                                    {
+                                        this.Logger.LogTrace($"Event {nextEvents.GetType().Name} with id {baseEvt.Id} ignored, it was cancelled.");
+                                    }
+
+                                    // Clean up the event.
+                                    this.eventsIndex.Remove(baseEvt.Id);
                                 }
-                                else
-                                {
-                                    this.Logger.LogTrace($"Event {nextEvent.GetType().Name} with id {nextEvent.Id} ignored, it was cancelled.");
-                                }
-
-                                // Clean up the event.
-                                this.eventsIndex.Remove(nextEvent.Id);
                             }
                             else
                             {
@@ -280,20 +298,24 @@ public class EventsReactor : IEventsReactor
                           {
                               // Since we have locked on the events lock, we know that the processing loop is halted.
                               // Let's add the events waiting to be added to the queue as fast as possible.
-                              while (this.eventDemultiplexingQueue.TryDequeue(out (IEvent Event, DateTimeOffset RequestedAt, TimeSpan Delay) request))
+                              while (this.eventDemultiplexingQueue.TryDequeue(out (BaseEvent Event, DateTimeOffset RequestedAt, TimeSpan Delay) request))
                               {
                                   var currentTime = CurrentTime;
                                   var targetTime = currentTime + request.Delay;
                                   var elapsedTime = currentTime - request.RequestedAt;
                                   var adjustedDelay = request.Delay - elapsedTime;
+                                  var normalizedTargetTime = (currentTime + adjustedDelay).Round(this.timeToRoundBy);
 
-                                  this.EnqueueEvent(request.Event, currentTime + adjustedDelay);
+                                  this.EnqueueEvent(request.Event, normalizedTargetTime);
 
                                   this.Logger.LogTrace($"Enqueued {request.Event.GetType().Name} with id {request.Event.Id}, due in {request.Delay.TotalMilliseconds} milliseconds (at {targetTime}).");
                               }
 
                               // Let the other loop know there's more work available.
-                              Monitor.Pulse(this.eventsAvailableLock);
+                              if (this.eventsQueue.Any())
+                              {
+                                  Monitor.Pulse(this.eventsAvailableLock);
+                              }
                           }
                       }
                   }
@@ -324,35 +346,39 @@ public class EventsReactor : IEventsReactor
         }
     }
 
-    private void EnqueueEvent(IEvent evt, DateTimeOffset targetTime)
+    private void EnqueueEvent(BaseEvent evt, DateTimeOffset targetTime)
     {
         lock (this.eventsAvailableLock)
         {
             if (this.eventsQueue.Count == 0)
             {
-                this.eventsQueue.AddFirst(evt);
+                this.eventsQueue.AddFirst(new EventsNode(targetTime, evt));
                 this.medianNode = this.eventsQueue.First;
             }
-            else if (targetTime <= this.medianNode.ValueRef.NextExecutionTime)
+            else if (targetTime <= this.medianNode.ValueRef.TargetTime)
             {
                 // Enqueue from the first and find the right spot.
                 var currentNode = this.eventsQueue.First;
 
-                while (currentNode.ValueRef.NextExecutionTime < targetTime
+                while (currentNode.ValueRef.TargetTime < targetTime
                     && currentNode.Next != null
-                    && targetTime <= currentNode.Next.ValueRef.NextExecutionTime)
+                    && targetTime <= currentNode.Next.ValueRef.TargetTime)
                 {
                     currentNode = currentNode.Next;
                 }
 
-                if (currentNode.ValueRef.NextExecutionTime <= targetTime)
+                if (currentNode.ValueRef.TargetTime == targetTime)
                 {
-                    this.eventsQueue.AddAfter(currentNode, evt);
+                    currentNode.ValueRef.Events.Add(evt);
+                }
+                else if (currentNode.ValueRef.TargetTime < targetTime)
+                {
+                    this.eventsQueue.AddAfter(currentNode, new EventsNode(targetTime, evt));
                     this.medianBalance++;
                 }
                 else
                 {
-                    this.eventsQueue.AddBefore(currentNode, evt);
+                    this.eventsQueue.AddBefore(currentNode, new EventsNode(targetTime, evt));
                     this.medianBalance--;
                 }
             }
@@ -361,21 +387,25 @@ public class EventsReactor : IEventsReactor
                 // Enqueue from the last and find the right spot.
                 var currentNode = this.eventsQueue.Last;
 
-                while (targetTime < currentNode.ValueRef.NextExecutionTime
+                while (targetTime < currentNode.ValueRef.TargetTime
                     && currentNode.Previous != null
-                    && currentNode.Previous.ValueRef.NextExecutionTime < targetTime)
+                    && currentNode.Previous.ValueRef.TargetTime < targetTime)
                 {
                     currentNode = currentNode.Previous;
                 }
 
-                if (currentNode.ValueRef.NextExecutionTime <= targetTime)
+                if (currentNode.ValueRef.TargetTime == targetTime)
                 {
-                    this.eventsQueue.AddAfter(currentNode, evt);
+                    currentNode.ValueRef.Events.Add(evt);
+                }
+                else if (currentNode.ValueRef.TargetTime < targetTime)
+                {
+                    this.eventsQueue.AddAfter(currentNode, new EventsNode(targetTime, evt));
                     this.medianBalance++;
                 }
                 else
                 {
-                    this.eventsQueue.AddBefore(currentNode, evt);
+                    this.eventsQueue.AddBefore(currentNode, new EventsNode(targetTime, evt));
                     this.medianBalance--;
                 }
             }
@@ -404,7 +434,7 @@ public class EventsReactor : IEventsReactor
     /// </summary>
     /// <param name="evt">The event to cancel.</param>
     /// <returns>True if the event is cancelled, false otherwise.</returns>
-    private bool Cancel(IEvent evt)
+    private bool Cancel(BaseEvent evt)
     {
         evt.ThrowIfNull();
 
@@ -419,6 +449,7 @@ public class EventsReactor : IEventsReactor
         lock (this.eventsAvailableLock)
         {
             evt.State = EventState.Cancelled;
+            evt.NextExecutionTime = null;
         }
 
         this.Logger.LogTrace($"Event {evt.GetType().Name} with id {evt.Id} was cancelled.");

@@ -19,7 +19,7 @@
     <PackageProjectUrl>https://fibula-mmo.github.io/</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Fibula-MMO/fibula-events-engine</RepositoryUrl>
     <RepositoryType>GitHub</RepositoryType>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <NeutralLanguage>en</NeutralLanguage>
     <Description>Contains implementations for the events engine framework used in the Fibula project.</Description>
   </PropertyGroup>
@@ -37,7 +37,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Fibula.Utilities.Common" Version="1.1.1" />
+    <PackageReference Include="Fibula.Utilities.Common" Version="1.1.2" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="6.0.0" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="6.0.0" />
     <PackageReference Include="StyleCop.Analyzers" Version="1.1.118">
