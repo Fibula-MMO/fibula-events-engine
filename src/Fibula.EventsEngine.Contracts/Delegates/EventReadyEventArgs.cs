@@ -24,15 +24,22 @@ public class EventReadyEventArgs : EventArgs
     /// Initializes a new instance of the <see cref="EventReadyEventArgs"/> class.
     /// </summary>
     /// <param name="evt">The target event.</param>
-    public EventReadyEventArgs(IEvent evt)
+    /// <param name="drift">The event's time drift.</param>
+    public EventReadyEventArgs(IEvent evt, TimeSpan drift)
     {
         evt.ThrowIfNull(nameof(evt));
 
         this.Event = evt;
+        this.TimeDrift = drift;
     }
 
     /// <summary>
     /// Gets the event that is ready.
     /// </summary>
     public IEvent Event { get; }
+
+    /// <summary>
+    /// Gets the time drift between the expected and actual event ready times.
+    /// </summary>
+    public TimeSpan TimeDrift { get; }
 }

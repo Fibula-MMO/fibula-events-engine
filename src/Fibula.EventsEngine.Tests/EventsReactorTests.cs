@@ -12,9 +12,13 @@
 namespace Fibula.EventsEngine.Tests;
 
 using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+using Fibula.EventsEngine.Contracts.Delegates;
+using Fibula.Utilities.Common.Extensions;
 using Fibula.Utilities.Testing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -27,6 +31,11 @@ using Moq;
 [TestClass]
 public class EventsReactorTests
 {
+    /// <summary>
+    /// Default reactor options known to be good.
+    /// </summary>
+    private static readonly IOptions<EventsReactorOptions> GoodReactorOptions = Options.Create(new EventsReactorOptions() { EventRoundByMilliseconds = 100 });
+
     /// <summary>
     /// Checks <see cref="EventsReactor"/> initialization.
     /// </summary>
@@ -60,20 +69,20 @@ public class EventsReactorTests
     {
         const int ExpectedCounterValueBeforeRun = 0;
         const int ExpectedCounterValueAfterRun = 0;
+        const int MinimumOverheadDelayMs = 200;
 
-        TimeSpan overheadDelay = TimeSpan.FromMilliseconds(100);
+        TimeSpan overheadDelay = TimeSpan.FromMilliseconds(MinimumOverheadDelayMs);
         TimeSpan twoSecondsTimeSpan = TimeSpan.FromSeconds(2);
         TimeSpan threeSecondsTimeSpan = TimeSpan.FromSeconds(3);
 
         var eventFiredCounter = 0;
-
-        Mock<BaseEvent> eventMock = new Mock<BaseEvent>();
+        var eventMock = new Mock<BaseEvent>();
 
         eventMock.SetupGet(e => e.CanBeCancelled).Returns(true);
 
-        EventsReactor reactor = this.SetupReactorWithConsoleLogger();
+        EventsReactor reactor = SetupReactorWithConsoleLogger(Options.Create(new EventsReactorOptions() { EventRoundByMilliseconds = MinimumOverheadDelayMs }));
 
-        using CancellationTokenSource cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
 
         reactor.EventReady += (sender, eventArgs) =>
         {
@@ -123,17 +132,17 @@ public class EventsReactorTests
         const int ExpectedCounterValueAfterRun = 1;
 
         TimeSpan twoSecondsTimeSpan = TimeSpan.FromSeconds(2);
-        TimeSpan overheadDelay = TimeSpan.FromMilliseconds(500);
+        TimeSpan overheadDelay = TimeSpan.FromMilliseconds(100);
 
         BaseEvent eventWithNoDelay = Mock.Of<BaseEvent>();
         BaseEvent eventWithDelay = Mock.Of<BaseEvent>();
 
-        var reactor = this.SetupReactorWithConsoleLogger();
+        var reactor = SetupReactorWithConsoleLogger();
 
         var inmediateEventFiredCounter = 0;
         var delayedEventFiredCounter = 0;
 
-        using CancellationTokenSource cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
 
         reactor.EventReady += (sender, eventArgs) =>
         {
@@ -182,16 +191,86 @@ public class EventsReactorTests
     }
 
     /// <summary>
+    /// Tests that the events reactor works as intended under simulated load.
+    /// </summary>
+    /// <returns>A <see cref="Task"/> representing the asynchronous unit test.</returns>
+    [TestMethod]
+    public async Task TestRandomizedLoad()
+    {
+        // We simulate a load of 1000 events out of which about 20% get cancelled and 80% don't.
+        // The events will have randomized delays, some of which might fall outside of the test's TTL.
+        // The final set of processed events must match the expected value for events that fall within the test's TTL.
+        const int LoadSize = 10000;
+        const int RoundByMs = 500;
+        var cutoffTime = TimeSpan.FromMilliseconds(5000);
+
+        // The time drift should be around half of the RoundBy milliseconds, but we give an extra 10% cushion since
+        // there ought to be some processing time error.
+        var highestAcceptableTimeDiff = TimeSpan.FromMilliseconds(RoundByMs * 0.6);
+        var eventsDictionary = new Dictionary<Guid, TimeSpan>();
+        var rng = new Random(1337);
+
+        var reactor = SetupReactorWithConsoleLogger(Options.Create(new EventsReactorOptions() { EventRoundByMilliseconds = RoundByMs }));
+
+        void OnEventReadyFunc(object sender, EventReadyEventArgs eventArgs)
+        {
+            // test that sender is the same reactor instance, while we're here.
+            Assert.AreEqual(reactor, sender);
+
+            // check that event has a reference.
+            Assert.IsNotNull(eventArgs?.Event);
+
+            if (!eventsDictionary.ContainsKey(eventArgs.Event.Id))
+            {
+                throw new InvalidOperationException($"Unknown event with id {eventArgs.Event.Id} received.");
+            }
+
+            eventsDictionary[eventArgs.Event.Id] = eventArgs.TimeDrift;
+        }
+
+        reactor.EventReady += OnEventReadyFunc;
+
+        using var cts = new CancellationTokenSource();
+
+        // start the reactor.
+        Task reactorTask = reactor.RunAsync(cts.Token);
+
+        for (int i = 0; i < LoadSize; i++)
+        {
+            BaseEvent evt = Mock.Of<BaseEvent>();
+
+            // let's do a 50% chance to delay this event.
+            var delayThisEvent = rng.Next(2) == 0;
+
+            eventsDictionary[evt.Id] = TimeSpan.Zero;
+
+            reactor.Push(evt, delayThisEvent ? TimeSpan.FromSeconds(rng.Next(10)) : null);
+        }
+
+        await Task.Delay(cutoffTime).ContinueWith(prev =>
+        {
+            // unsubscribe to prevent more events polluting the results.
+            reactor.EventReady -= OnEventReadyFunc;
+
+            foreach (var (evtId, timeDrift) in eventsDictionary)
+            {
+                var isAcceptableTimeDrift = timeDrift >= TimeSpan.Zero && timeDrift <= highestAcceptableTimeDiff;
+
+                Assert.IsTrue(isAcceptableTimeDrift, $"Event {evtId} time difference was too large: {timeDrift}.");
+            }
+        });
+    }
+
+    /// <summary>
     /// Helper method used to setup a <see cref="EventsReactor"/> instance with a console logger.
     /// </summary>
     /// <returns>The reactor instance.</returns>
-    private EventsReactor SetupReactorWithConsoleLogger()
+    private static EventsReactor SetupReactorWithConsoleLogger(IOptions<EventsReactorOptions> options = null)
     {
         using var logFactory = LoggerFactory.Create(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Trace));
-        IOptions<EventsReactorOptions> goodOptions = Options.Create(new EventsReactorOptions() { EventRoundByMilliseconds = 100 });
 
         var logger = logFactory.CreateLogger<EventsReactor>();
 
-        return new EventsReactor(logger, goodOptions);
+        return new EventsReactor(logger, options ?? GoodReactorOptions);
     }
 }
