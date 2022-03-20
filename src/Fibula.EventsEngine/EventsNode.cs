@@ -25,7 +25,7 @@ internal sealed class EventsNode
     /// </summary>
     /// <param name="targetTime">The target time for events in this node.</param>
     /// <param name="events">The events that compose this node.</param>
-    public EventsNode(DateTimeOffset targetTime, params BaseEvent[] events)
+    public EventsNode(DateTimeOffset targetTime, params Event[] events)
     {
         if (events.Length == 0)
         {
@@ -44,5 +44,5 @@ internal sealed class EventsNode
     /// <summary>
     /// Gets the event that the node references.
     /// </summary>
-    public IList<BaseEvent> Events { get; private set; }
+    public IList<Event> Events { get; private set; }
 }

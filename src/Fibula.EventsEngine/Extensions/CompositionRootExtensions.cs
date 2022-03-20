@@ -26,6 +26,6 @@ public static class CompositionRootExtensions
     /// <param name="services">The services collection.</param>
     public static void AddEventsReactor(this IServiceCollection services)
     {
-        services.AddSingleton<IEventsReactor, EventsReactor>();
+        services.AddSingleton<IEventsReactor<Event>, EventsReactor>();
     }
 }

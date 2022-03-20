@@ -17,6 +17,8 @@ using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+using Fibula.EventsEngine.Contracts;
+using Fibula.EventsEngine.Contracts.Abstractions;
 using Fibula.EventsEngine.Contracts.Delegates;
 using Fibula.Utilities.Common.Extensions;
 using Fibula.Utilities.Testing;
@@ -76,23 +78,21 @@ public class EventsReactorTests
         TimeSpan threeSecondsTimeSpan = TimeSpan.FromSeconds(3);
 
         var eventFiredCounter = 0;
-        var eventMock = new Mock<BaseEvent>();
-
-        eventMock.SetupGet(e => e.CanBeCancelled).Returns(true);
+        var eventMock = new Mock<Event>();
 
         EventsReactor reactor = SetupReactorWithConsoleLogger(Options.Create(new EventsReactorOptions() { EventRoundByMilliseconds = MinimumOverheadDelayMs }));
 
         using var cts = new CancellationTokenSource();
 
-        reactor.EventReady += (sender, eventArgs) =>
+        reactor.EventReady += (sender, evt, timeDrift) =>
         {
             // test that sender is the same reactor instance, while we're here.
             Assert.AreEqual(reactor, sender);
 
             // check that event has a reference.
-            Assert.IsNotNull(eventArgs?.Event);
+            Assert.IsNotNull(evt);
 
-            if (eventArgs.Event == eventMock.Object)
+            if (evt == eventMock.Object)
             {
                 eventFiredCounter++;
             }
@@ -122,6 +122,217 @@ public class EventsReactorTests
     }
 
     /// <summary>
+    /// Checks that <see cref="EventsReactor.Delay(Guid, TimeSpan)"/> does what it should.
+    /// </summary>
+    /// <returns>A <see cref="Task"/> representing the asynchronous unit test.</returns>
+    [TestMethod]
+    public async Task Delaying_SingleEvent()
+    {
+        const int ExpectedCounterValueBeforeRun = 0;
+        const int ExpectedCounterValueAfterDelay = 0;
+        const int ExpectedCounterValueAfterRun = 1;
+        const int MinimumOverheadDelayMs = 200;
+
+        TimeSpan overheadDelay = TimeSpan.FromMilliseconds(MinimumOverheadDelayMs);
+        TimeSpan twoSecondsTimeSpan = TimeSpan.FromSeconds(2);
+        TimeSpan threeSecondsTimeSpan = TimeSpan.FromSeconds(3);
+
+        var eventFiredCounter = 0;
+        var eventMock = new Mock<Event>();
+
+        EventsReactor reactor = SetupReactorWithConsoleLogger(Options.Create(new EventsReactorOptions() { EventRoundByMilliseconds = MinimumOverheadDelayMs }));
+
+        using var cts = new CancellationTokenSource();
+
+        reactor.EventReady += (sender, evt, timeDrift) =>
+        {
+            // test that sender is the same reactor instance, while we're here.
+            Assert.AreEqual(reactor, sender);
+
+            // check that event has a reference.
+            Assert.IsNotNull(evt);
+
+            if (evt == eventMock.Object)
+            {
+                eventFiredCounter++;
+            }
+        };
+
+        // start the reactor.
+        Task reactorTask = reactor.RunAsync(cts.Token);
+
+        await Task.Delay(overheadDelay)
+            .ContinueWith(prev =>
+            {
+                // push an event that shall be ready after some time...
+                reactor.Push(eventMock.Object, twoSecondsTimeSpan);
+            })
+            .ContinueWith(prev =>
+            {
+                Assert.AreEqual(ExpectedCounterValueBeforeRun, eventFiredCounter, $"Events counter does not match: Expected {ExpectedCounterValueBeforeRun}, got {eventFiredCounter}.");
+            })
+           .ContinueWith(prev =>
+           {
+               // now delay the event..
+               Assert.IsTrue(reactor.Delay(eventMock.Object.Id, threeSecondsTimeSpan));
+           })
+           .ContinueWith(prev =>
+           {
+               // wait two seconds and check that the counter has NOT gone up, since we delayed the event..
+               Task.Delay(twoSecondsTimeSpan).Wait();
+           })
+           .ContinueWith(prev =>
+           {
+               Assert.AreEqual(ExpectedCounterValueAfterDelay, eventFiredCounter, $"Events counter does not match: Expected {ExpectedCounterValueAfterDelay}, got {eventFiredCounter}.");
+           })
+           .ContinueWith(prev =>
+           {
+               // wait three more seconds and check that the counter has gone up, since the event should have ran already.
+               Task.Delay(threeSecondsTimeSpan).Wait();
+           })
+           .ContinueWith(prev =>
+           {
+               Assert.AreEqual(ExpectedCounterValueAfterRun, eventFiredCounter, $"Events counter does not match: Expected {ExpectedCounterValueAfterRun}, got {eventFiredCounter}.");
+           });
+
+        cts.Cancel();
+    }
+
+    /// <summary>
+    /// Checks that <see cref="EventsReactor.Hurry(Guid, TimeSpan)"/> does what it should.
+    /// </summary>
+    /// <returns>A <see cref="Task"/> representing the asynchronous unit test.</returns>
+    [TestMethod]
+    public async Task Hurrying_SingleEvent()
+    {
+        const int ExpectedCounterValueBeforeRun = 0;
+        const int ExpectedCounterValueAfterHurry = 1;
+        const int MinimumOverheadDelayMs = 200;
+
+        TimeSpan overheadDelay = TimeSpan.FromMilliseconds(MinimumOverheadDelayMs);
+        TimeSpan fourSecondsTimeSpan = TimeSpan.FromSeconds(4);
+        TimeSpan threeSecondsTimeSpan = TimeSpan.FromSeconds(3);
+
+        var eventFiredCounter = 0;
+        var eventMock = new Mock<Event>();
+
+        EventsReactor reactor = SetupReactorWithConsoleLogger(Options.Create(new EventsReactorOptions() { EventRoundByMilliseconds = MinimumOverheadDelayMs }));
+
+        using var cts = new CancellationTokenSource();
+
+        reactor.EventReady += (sender, evt, timeDrift) =>
+        {
+            // test that sender is the same reactor instance, while we're here.
+            Assert.AreEqual(reactor, sender);
+
+            // check that event has a reference.
+            Assert.IsNotNull(evt);
+
+            if (evt == eventMock.Object)
+            {
+                eventFiredCounter++;
+            }
+        };
+
+        // start the reactor.
+        Task reactorTask = reactor.RunAsync(cts.Token);
+
+        await Task.Delay(overheadDelay)
+            .ContinueWith(prev =>
+            {
+                Assert.AreEqual(ExpectedCounterValueBeforeRun, eventFiredCounter, $"Events counter does not match: Expected {ExpectedCounterValueBeforeRun}, got {eventFiredCounter}.");
+            })
+            .ContinueWith(prev =>
+            {
+                // push an event that shall be ready after some time...
+                reactor.Push(eventMock.Object, fourSecondsTimeSpan);
+            })
+           .ContinueWith(prev =>
+           {
+               // now hurry the event...
+               Assert.IsTrue(reactor.Hurry(eventMock.Object.Id, threeSecondsTimeSpan));
+            })
+           .ContinueWith(prev =>
+            {
+                // wait three seconds and check that the counter has gone up, since the event should have ran already.
+                Task.Delay(threeSecondsTimeSpan).Wait();
+            })
+           .ContinueWith(prev =>
+           {
+               Assert.AreEqual(ExpectedCounterValueAfterHurry, eventFiredCounter, $"Events counter does not match: Expected {ExpectedCounterValueAfterHurry}, got {eventFiredCounter}.");
+           });
+
+        cts.Cancel();
+    }
+
+    /// <summary>
+    /// Checks that <see cref="EventsReactor.Expedite(Guid)"/> does what it should.
+    /// </summary>
+    /// <returns>A <see cref="Task"/> representing the asynchronous unit test.</returns>
+    [TestMethod]
+    public async Task Expedite_SingleEvent()
+    {
+        const int ExpectedCounterValueBeforeRun = 0;
+        const int ExpectedCounterValueAfterRun = 1;
+        const int MinimumOverheadDelayMs = 200;
+
+        TimeSpan overheadDelay = TimeSpan.FromMilliseconds(MinimumOverheadDelayMs);
+        TimeSpan fiveSecondsTimeSpan = TimeSpan.FromSeconds(5);
+        TimeSpan twoSecondsTimeSpan = TimeSpan.FromSeconds(2);
+
+        var eventFiredCounter = 0;
+        var eventMock = new Mock<Event>();
+
+        EventsReactor reactor = SetupReactorWithConsoleLogger(Options.Create(new EventsReactorOptions() { EventRoundByMilliseconds = MinimumOverheadDelayMs }));
+
+        using var cts = new CancellationTokenSource();
+
+        reactor.EventReady += (sender, evt, timeDrift) =>
+        {
+            // test that sender is the same reactor instance, while we're here.
+            Assert.AreEqual(reactor, sender);
+
+            // check that event has a reference.
+            Assert.IsNotNull(evt);
+
+            if (evt == eventMock.Object)
+            {
+                eventFiredCounter++;
+            }
+        };
+
+        // start the reactor.
+        Task reactorTask = reactor.RunAsync(cts.Token);
+
+        await Task.Delay(overheadDelay)
+            .ContinueWith(prev =>
+            {
+                // push an event that shall be ready after some time...
+                reactor.Push(eventMock.Object, fiveSecondsTimeSpan);
+            })
+            .ContinueWith(prev =>
+            {
+                Assert.AreEqual(ExpectedCounterValueBeforeRun, eventFiredCounter, $"Events counter does not match: Expected {ExpectedCounterValueBeforeRun}, got {eventFiredCounter}.");
+            })
+           .ContinueWith(prev =>
+           {
+               // now expedite the event...
+               reactor.Expedite(eventMock.Object.Id);
+           })
+           .ContinueWith(prev =>
+           {
+               // wait a bit and check that the counter has gone up, since the event should have ran already.
+               Task.Delay(twoSecondsTimeSpan).Wait();
+           })
+           .ContinueWith(prev =>
+           {
+               Assert.AreEqual(ExpectedCounterValueAfterRun, eventFiredCounter, $"Events counter does not match: Expected {ExpectedCounterValueAfterRun}, got {eventFiredCounter}.");
+           });
+
+        cts.Cancel();
+    }
+
+    /// <summary>
     /// Checks that <see cref="EventsReactor.EventReady"/> gets fired when an event goes through the reactor and delay.
     /// </summary>
     /// <returns>A <see cref="Task"/> representing the asynchronous unit test.</returns>
@@ -134,8 +345,8 @@ public class EventsReactorTests
         TimeSpan twoSecondsTimeSpan = TimeSpan.FromSeconds(2);
         TimeSpan overheadDelay = TimeSpan.FromMilliseconds(100);
 
-        BaseEvent eventWithNoDelay = Mock.Of<BaseEvent>();
-        BaseEvent eventWithDelay = Mock.Of<BaseEvent>();
+        Event eventWithNoDelay = Mock.Of<Event>();
+        Event eventWithDelay = Mock.Of<Event>();
 
         var reactor = SetupReactorWithConsoleLogger();
 
@@ -144,19 +355,19 @@ public class EventsReactorTests
 
         using var cts = new CancellationTokenSource();
 
-        reactor.EventReady += (sender, eventArgs) =>
+        reactor.EventReady += (sender, evt, drift) =>
         {
             // test that sender is the same reactor instance, while we're here.
             Assert.AreEqual(reactor, sender);
 
             // check that event has a reference.
-            Assert.IsNotNull(eventArgs?.Event);
+            Assert.IsNotNull(evt);
 
-            if (eventArgs.Event == eventWithNoDelay)
+            if (evt == eventWithNoDelay)
             {
                 inmediateEventFiredCounter++;
             }
-            else if (eventArgs.Event == eventWithDelay)
+            else if (evt == eventWithDelay)
             {
                 delayedEventFiredCounter++;
             }
@@ -212,20 +423,20 @@ public class EventsReactorTests
 
         var reactor = SetupReactorWithConsoleLogger(Options.Create(new EventsReactorOptions() { EventRoundByMilliseconds = RoundByMs }));
 
-        void OnEventReadyFunc(object sender, EventReadyEventArgs eventArgs)
+        void OnEventReadyFunc(object sender, IEvent evt, TimeSpan timeDrift)
         {
             // test that sender is the same reactor instance, while we're here.
             Assert.AreEqual(reactor, sender);
 
             // check that event has a reference.
-            Assert.IsNotNull(eventArgs?.Event);
+            Assert.IsNotNull(evt);
 
-            if (!eventsDictionary.ContainsKey(eventArgs.Event.Id))
+            if (!eventsDictionary.ContainsKey(evt.Id))
             {
-                throw new InvalidOperationException($"Unknown event with id {eventArgs.Event.Id} received.");
+                throw new InvalidOperationException($"Unknown event with id {evt.Id} received.");
             }
 
-            eventsDictionary[eventArgs.Event.Id] = eventArgs.TimeDrift;
+            eventsDictionary[evt.Id] = timeDrift;
         }
 
         reactor.EventReady += OnEventReadyFunc;
@@ -237,7 +448,7 @@ public class EventsReactorTests
 
         for (int i = 0; i < LoadSize; i++)
         {
-            BaseEvent evt = Mock.Of<BaseEvent>();
+            Event evt = Mock.Of<Event>();
 
             // let's do a 50% chance to delay this event.
             var delayThisEvent = rng.Next(2) == 0;

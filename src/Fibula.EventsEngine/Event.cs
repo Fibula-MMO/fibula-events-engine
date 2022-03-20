@@ -1,5 +1,5 @@
 ﻿// -----------------------------------------------------------------
-// <copyright file="BaseEvent.cs" company="2Dudes">
+// <copyright file="Event.cs" company="2Dudes">
 // Copyright (c) | Jose L. Nunez de Caceres et al.
 // https://linkedin.com/in/nunezdecaceres
 //
@@ -19,12 +19,12 @@ using Fibula.EventsEngine.Contracts.Enumerations;
 /// <summary>
 /// Abstract class that represents the base event for scheduling.
 /// </summary>
-public abstract class BaseEvent : IEvent, IEquatable<BaseEvent>
+public abstract class Event : IEvent, IEquatable<Event>
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="BaseEvent"/> class.
+    /// Initializes a new instance of the <see cref="Event"/> class.
     /// </summary>
-    public BaseEvent()
+    public Event()
     {
         this.Id = Guid.NewGuid();
         this.State = EventState.Created;
@@ -36,16 +36,6 @@ public abstract class BaseEvent : IEvent, IEquatable<BaseEvent>
     public Guid Id { get; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether the event can be cancelled.
-    /// </summary>
-    public abstract bool CanBeCancelled { get; protected set; }
-
-    /// <summary>
-    /// Gets or sets a value indicating whether to exclude this event from telemetry logging.
-    /// </summary>
-    public bool ExcludeFromTelemetry { get; protected set; }
-
-    /// <summary>
     /// Gets the event's state.
     /// </summary>
     public EventState State { get; internal set; }
@@ -55,22 +45,16 @@ public abstract class BaseEvent : IEvent, IEquatable<BaseEvent>
     /// </summary>
     /// <remarks>
     /// The event is only expected to have a value here if it is in the
-    /// <see cref="EventState.InQueue"/> or <see cref="EventState.Executed"/> states.
+    /// <see cref="EventState.InQueue"/> or <see cref="EventState.Executing"/> states.
     /// </remarks>
-    public DateTimeOffset? NextExecutionTime { get; internal set; }
-
-    /// <summary>
-    /// Executes the event logic.
-    /// </summary>
-    /// <param name="context">The execution context.</param>
-    public abstract void Execute(IEventExecutionContext context);
+    public DateTimeOffset? NextReadyTime { get; internal set; }
 
     /// <summary>
     /// Indicates whether the current object is equal to another object of the same type.
     /// </summary>
     /// <param name="other">The other object to compare against.</param>
     /// <returns>True if the current object is equal to the other parameter, false otherwise.</returns>
-    public bool Equals([AllowNull] BaseEvent other)
+    public bool Equals(Event other)
     {
         return this.Id == other?.Id;
     }
@@ -78,7 +62,7 @@ public abstract class BaseEvent : IEvent, IEquatable<BaseEvent>
     /// <inheritdoc/>
     public override bool Equals(object obj)
     {
-        return this.Equals(obj as BaseEvent);
+        return this.Equals(obj as Event);
     }
 
     /// <inheritdoc/>

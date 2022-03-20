@@ -19,7 +19,9 @@ using Fibula.EventsEngine.Contracts.Delegates;
 /// <summary>
 /// Interface that represents a reactor (pattern) for events.
 /// </summary>
-public interface IEventsReactor
+/// <typeparam name="TEvent">The type of event that this reactor works with.</typeparam>
+public interface IEventsReactor<TEvent>
+    where TEvent : IEvent
 {
     /// <summary>
     /// Event fired when the reactor has an event ready to execute.
@@ -36,7 +38,7 @@ public interface IEventsReactor
     /// </summary>
     /// <param name="eventToPush">The event to push.</param>
     /// <param name="delayBy">Optional. A delay after which the event should be fired. If left null, the event is scheduled to be fired ASAP.</param>
-    void Push(IEvent eventToPush, TimeSpan? delayBy = null);
+    void Push(TEvent eventToPush, TimeSpan? delayBy = null);
 
     /// <summary>
     /// Attempts to cancel an event.
@@ -44,6 +46,29 @@ public interface IEventsReactor
     /// <param name="evtId">The id of the event to cancel.</param>
     /// <returns>True if the event was successfully cancelled, and false otherwise.</returns>
     bool Cancel(Guid evtId);
+
+    /// <summary>
+    /// Attempts to delay this event, pushing its next ready time into the future.
+    /// </summary>
+    /// <param name="evtId">The id of the event to delay.</param>
+    /// <param name="delayBy">The amount of time to delay the event by.</param>
+    /// <returns>True if the event is successfully delayed, and false otherwise.</returns>
+    bool Delay(Guid evtId, TimeSpan delayBy);
+
+    /// <summary>
+    /// Attempts to hurry this event, decreasing the time for it to be marked ready.
+    /// </summary>
+    /// <param name="evtId">The id of the event to hurry.</param>
+    /// <param name="hurryBy">The amount of time to hurry the event by.</param>
+    /// <returns>True if the event is successfully hurried, and false otherwise.</returns>
+    bool Hurry(Guid evtId, TimeSpan hurryBy);
+
+    /// <summary>
+    /// Attempts to expedite this event to the front of the queue.
+    /// </summary>
+    /// <param name="evtId">The id of the event to expedite.</param>
+    /// <returns>True if the event is successfully expedited, and false otherwise.</returns>
+    bool Expedite(Guid evtId);
 
     /// <summary>
     /// Starts the reactor's event processing loop.

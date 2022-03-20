@@ -28,7 +28,7 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Class that represents a scheduler for events.
 /// </summary>
-public class EventsReactor : IEventsReactor
+public class EventsReactor : IEventsReactor<Event>
 {
     /// <summary>
     /// A lock object to monitor when new events are added to the queue.
@@ -48,12 +48,17 @@ public class EventsReactor : IEventsReactor
     /// <summary>
     /// Internal queue to handle asynchronous event demultiplexing.
     /// </summary>
-    private readonly Queue<(BaseEvent evt, DateTimeOffset requestTime, TimeSpan requestedDelay)> eventDemultiplexingQueue;
+    private readonly Queue<(Event evt, DateTimeOffset requestTime, TimeSpan requestedDelay)> eventDemultiplexingQueue;
 
     /// <summary>
-    /// A mapping of events to their Ids for O(1) lookup.
+    /// A mapping of events ids to the actual event object, for O(1) lookup.
     /// </summary>
-    private readonly Dictionary<Guid, BaseEvent> eventsIndex;
+    private readonly Dictionary<Guid, Event> eventsIndex;
+
+    /// <summary>
+    /// A mapping of event ids to the node they are contained in, for O(1) lookup.
+    /// </summary>
+    private readonly Dictionary<Guid, EventsNode> eventNodesIndex;
 
     /// <summary>
     /// The time to round events target time by.
@@ -78,13 +83,14 @@ public class EventsReactor : IEventsReactor
         this.eventsPushedLock = new object();
 
         this.eventsQueue = new LinkedList<EventsNode>();
-        this.eventDemultiplexingQueue = new Queue<(BaseEvent evt, DateTimeOffset requestTime, TimeSpan requestedDelay)>();
-        this.eventsIndex = new Dictionary<Guid, BaseEvent>();
+        this.eventDemultiplexingQueue = new Queue<(Event evt, DateTimeOffset requestTime, TimeSpan requestedDelay)>();
+        this.eventsIndex = new Dictionary<Guid, Event>();
+        this.eventNodesIndex = new Dictionary<Guid, EventsNode>();
         this.timeToRoundBy = TimeSpan.FromMilliseconds(reactorOptions.Value.EventRoundByMilliseconds.Value);
     }
 
     /// <summary>
-    /// Event fired when the reactor has an event ready to execute.
+    /// Event fired when the reactor has an event ready to process.
     /// </summary>
     public event EventReadyDelegate EventReady;
 
@@ -110,14 +116,83 @@ public class EventsReactor : IEventsReactor
     /// <returns>True if the event was successfully cancelled, and false otherwise.</returns>
     public bool Cancel(Guid evtId)
     {
-        if (!this.eventsIndex.TryGetValue(evtId, out BaseEvent evt))
+        lock (this.eventsAvailableLock)
+        {
+            if (!this.eventsIndex.TryGetValue(evtId, out Event evt))
+            {
+                this.Logger.LogTrace("An event with id {eventId} was not found in the index.", evtId);
+
+                return false;
+            }
+
+            return this.Cancel(evt);
+        }
+    }
+
+    /// <summary>
+    /// Attempts to delay this event, pushing its next ready time into the future.
+    /// </summary>
+    /// <param name="evtId">The id of the event to delay.</param>
+    /// <param name="delayBy">The amount of time to delay the event by.</param>
+    /// <returns>True if the event is successfully delayed, and false otherwise.</returns>
+    public bool Delay(Guid evtId, TimeSpan delayBy)
+    {
+        lock (this.eventsAvailableLock)
+        {
+            if (!this.eventsIndex.TryGetValue(evtId, out Event evt))
+            {
+                this.Logger.LogTrace("An event with id {eventId} was not found in the index.", evtId);
+
+                return false;
+            }
+
+            return this.Delay(evt, delayBy);
+        }
+    }
+
+    /// <summary>
+    /// Attempts to hurry this event, decreasing the time for it to be marked ready.
+    /// </summary>
+    /// <param name="evtId">The id of the event to hurry.</param>
+    /// <param name="hurryBy">The amount of time to hurry the event by.</param>
+    /// <returns>True if the event is successfully hurried, and false otherwise.</returns>
+    public bool Hurry(Guid evtId, TimeSpan hurryBy)
+    {
+        lock (this.eventsAvailableLock)
+        {
+            if (!this.eventsIndex.TryGetValue(evtId, out Event evt))
+            {
+                this.Logger.LogTrace("An event with id {eventId} was not found in the index.", evtId);
+
+                return false;
+            }
+
+            return this.Hurry(evt, hurryBy);
+        }
+    }
+
+    /// <summary>
+    /// Attempts to expedite this event to the front of the queue.
+    /// </summary>
+    /// <param name="evtId">The id of the event to expedite.</param>
+    /// <returns>True if the event is successfully expedited, and false otherwise.</returns>
+    public bool Expedite(Guid evtId)
+    {
+        if (!this.eventsIndex.TryGetValue(evtId, out Event evt))
         {
             this.Logger.LogTrace("An event with id {eventId} was not found in the index.", evtId);
 
             return false;
         }
 
-        return this.Cancel(evt);
+        if (!this.eventNodesIndex.TryGetValue(evtId, out EventsNode evtNode))
+        {
+            this.Logger.LogTrace("A node for event with id {eventId} was not found in the index.", evtId);
+
+            return false;
+        }
+
+        return this.Hurry(evt, TimeSpan.MaxValue);
     }
 
     /// <summary>
@@ -125,14 +200,9 @@ public class EventsReactor : IEventsReactor
     /// </summary>
     /// <param name="eventToPush">The event to push.</param>
     /// <param name="delayBy">Optional. A delay after which the event should be fired. If left null, the event is scheduled to be fired ASAP.</param>
-    public void Push(IEvent eventToPush, TimeSpan? delayBy = null)
+    public void Push(Event eventToPush, TimeSpan? delayBy = null)
     {
         eventToPush.ThrowIfNull(nameof(eventToPush));
-
-        if (eventToPush is not BaseEvent baseEvent)
-        {
-            throw new ArgumentException($"This reactor can only accept events derived from {nameof(BaseEvent)}");
-        }
 
         if (delayBy == null || delayBy < TimeSpan.Zero)
         {
@@ -141,7 +211,7 @@ public class EventsReactor : IEventsReactor
 
         lock (this.eventsPushedLock)
         {
-            this.eventDemultiplexingQueue.Enqueue((baseEvent, CurrentTime, delayBy.Value));
+            this.eventDemultiplexingQueue.Enqueue((eventToPush, CurrentTime, delayBy.Value));
 
             this.Logger.LogTrace("Pushed event {eventName} with id {eventId} for demultiplexing.", eventToPush.GetType().Name, eventToPush.Id);
 
@@ -190,6 +260,8 @@ public class EventsReactor : IEventsReactor
                         }
 
                         // Wait until we're flagged that there are events available.
+                        this.Logger.LogTrace("Waiting for events to process...");
+
                         Monitor.Wait(this.eventsAvailableLock, timeout);
 
                         // Then, we reset time to wait and start the stopwatch.
@@ -210,27 +282,27 @@ public class EventsReactor : IEventsReactor
                         // Check the current queue and fire any events that are due.
                         while (this.IsNextEventDue(TimeSpan.FromMilliseconds(avgProcessingTime), ref timeout) && this.DequeueEventNode() is EventsNode nextNode)
                         {
-                            foreach (var baseEvt in nextNode.Events)
+                            foreach (var evt in nextNode.Events)
                             {
-                                if (baseEvt.State == EventState.Cancelled)
+                                this.eventsIndex.Remove(evt.Id);
+                                this.eventNodesIndex.Remove(evt.Id);
+
+                                if (evt.State == EventState.Cancelled)
                                 {
-                                    this.Logger.LogTrace("Event {eventName} with id {eventId} ignored since it was cancelled.", baseEvt.GetType().Name, baseEvt.Id);
+                                    this.Logger.LogTrace("Event {eventName} with id {eventId} ignored since it was cancelled.", evt.GetType().Name, evt.Id);
                                     continue;
                                 }
 
                                 var currentTime = CurrentTime;
 
-                                this.Logger.LogTrace("Event {eventName} with id {eventId}, marked ready at {currentTimeTicks}.", baseEvt.GetType().Name, baseEvt.Id, currentTime.Ticks);
+                                this.Logger.LogTrace("Event {eventName} with id {eventId}, marked ready at {currentTimeTicks}.", evt.GetType().Name, evt.Id, currentTime.Ticks);
 
-                                baseEvt.State = EventState.Executing;
+                                evt.State = EventState.Executing;
 
-                                this.EventReady?.Invoke(this, new EventReadyEventArgs(baseEvt, currentTime - baseEvt.NextExecutionTime.Value));
+                                this.EventReady?.Invoke(this, evt, currentTime - evt.NextReadyTime.Value);
 
-                                baseEvt.State = EventState.Executed;
-                                baseEvt.NextExecutionTime = null;
-
-                                // Clean up the event.
-                                this.eventsIndex.Remove(baseEvt.Id);
+                                evt.State = EventState.Executed;
+                                evt.NextReadyTime = null;
                             }
                         }
 
@@ -261,13 +333,15 @@ public class EventsReactor : IEventsReactor
                   {
                       lock (this.eventsPushedLock)
                       {
+                          this.Logger.LogTrace("Waiting for events to demultiplex...");
+
                           Monitor.Wait(this.eventsPushedLock);
 
                           lock (this.eventsAvailableLock)
                           {
                               // Since we have locked on the events lock, we know that the processing loop is halted.
                               // Let's add the events waiting to be added to the queue as fast as possible.
-                              while (this.eventDemultiplexingQueue.TryDequeue(out (BaseEvent Event, DateTimeOffset RequestedAt, TimeSpan Delay) request))
+                              while (this.eventDemultiplexingQueue.TryDequeue(out (Event Event, DateTimeOffset RequestedAt, TimeSpan Delay) request))
                               {
                                   var currentTime = CurrentTime;
                                   var elapsedTime = currentTime - request.RequestedAt;
@@ -329,21 +403,23 @@ public class EventsReactor : IEventsReactor
     /// </summary>
     /// <param name="evt">The event to enqueue.</param>
     /// <param name="targetTime">The target time for the event, which gets rounded to fit <see cref="timeToRoundBy"/>.</param>
-    private void EnqueueEvent(BaseEvent evt, ref DateTimeOffset targetTime)
+    private void EnqueueEvent(Event evt, ref DateTimeOffset targetTime)
     {
         targetTime = targetTime.Round(this.timeToRoundBy);
 
         lock (this.eventsAvailableLock)
         {
             evt.State = EventState.InQueue;
-            evt.NextExecutionTime = targetTime;
+            evt.NextReadyTime = targetTime;
 
-            this.eventsIndex.Add(evt.Id, evt);
+            this.eventsIndex[evt.Id] = evt;
 
             // If the queue is empty, we just add the first node.
             if (this.eventsQueue.Count == 0)
             {
-                this.eventsQueue.AddFirst(new EventsNode(targetTime, evt));
+                this.eventNodesIndex[evt.Id] = new EventsNode(targetTime, evt);
+
+                this.eventsQueue.AddFirst(this.eventNodesIndex[evt.Id]);
                 return;
             }
 
@@ -357,17 +433,24 @@ public class EventsReactor : IEventsReactor
 
             if (currentNode.ValueRef.TargetTime == targetTime)
             {
+                this.eventNodesIndex[evt.Id] = currentNode.ValueRef;
+
                 currentNode.ValueRef.Events.Add(evt);
+
                 return;
             }
 
+            var newNode = new EventsNode(targetTime, evt);
+
+            this.eventNodesIndex[evt.Id] = newNode;
+
             if (targetTime < currentNode.ValueRef.TargetTime)
             {
-                this.eventsQueue.AddBefore(currentNode, new EventsNode(targetTime, evt));
+                this.eventsQueue.AddBefore(currentNode, newNode);
             }
             else
             {
-                this.eventsQueue.AddAfter(currentNode, new EventsNode(targetTime, evt));
+                this.eventsQueue.AddAfter(currentNode, newNode);
             }
         }
     }
@@ -377,25 +460,102 @@ public class EventsReactor : IEventsReactor
     /// </summary>
     /// <param name="evt">The event to cancel.</param>
     /// <returns>True if the event is cancelled, false otherwise.</returns>
-    private bool Cancel(BaseEvent evt)
+    private bool Cancel(Event evt)
     {
-        evt.ThrowIfNull();
-
-        if (!evt.CanBeCancelled)
-        {
-            this.Logger.LogTrace("Event {eventName} with id {eventId} cannot be cancelled.", evt.GetType().Name, evt.Id);
-
-            return false;
-        }
+        evt.ThrowIfNull(nameof(evt));
 
         // Lock on the events available to prevent race conditions on cancel vs firing.
         lock (this.eventsAvailableLock)
         {
             evt.State = EventState.Cancelled;
-            evt.NextExecutionTime = null;
+            evt.NextReadyTime = null;
         }
 
         this.Logger.LogTrace("Event {eventName} with id {eventId} was cancelled.", evt.GetType().Name, evt.Id);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Attempts to delay this event, pushing its next ready time into the future.
+    /// </summary>
+    /// <param name="evt">The event to delay.</param>
+    /// <param name="delayBy">The amount of time to delay the event by.</param>
+    /// <returns>True if the event is successfully delayed, and false otherwise.</returns>
+    private bool Delay(Event evt, TimeSpan delayBy)
+    {
+        evt.ThrowIfNull(nameof(evt));
+
+        if (delayBy <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException($"Expected delay time to be a positive value, but got {delayBy}.");
+        }
+
+        // Lock on the events available to prevent race conditions on cancel vs firing.
+        lock (this.eventsAvailableLock)
+        {
+            if (!this.eventNodesIndex.TryGetValue(evt.Id, out EventsNode node))
+            {
+                this.Logger.LogTrace("A node for event with id {eventId} was not found in the index.", evt.Id);
+
+                return false;
+            }
+
+            if (!node.Events.Remove(evt))
+            {
+                this.Logger.LogTrace("Event {eventName} with id {eventId} could not be delayed.", evt.GetType().Name, evt.Id);
+
+                return false;
+            }
+
+            var newTargetTime = (evt.NextReadyTime + delayBy).Value;
+
+            this.EnqueueEvent(evt, ref newTargetTime);
+
+            this.Logger.LogTrace("Event {eventName} with id {eventId} was delayed to {timeTicks}.", evt.GetType().Name, evt.Id, newTargetTime.Ticks);
+        }
+
+        return true;
+    }
+
+    private bool Hurry(Event evt, TimeSpan hurryBy)
+    {
+        evt.ThrowIfNull(nameof(evt));
+
+        if (hurryBy <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException($"Expected hurry time to be a positive value, but got {hurryBy}.");
+        }
+
+        var isExpedite = hurryBy == TimeSpan.MaxValue;
+        var action = isExpedite ? "expedited" : "hurried";
+
+        // Lock on the events available to prevent race conditions on cancel vs firing.
+        lock (this.eventsAvailableLock)
+        {
+            if (!this.eventNodesIndex.TryGetValue(evt.Id, out EventsNode node))
+            {
+                this.Logger.LogTrace("A node for event with id {eventId} was not found in the index.", evt.Id);
+
+                return false;
+            }
+
+            if (!node.Events.Remove(evt))
+            {
+                this.Logger.LogTrace("Event {eventName} with id {eventId} could not be {action}.", evt.GetType().Name, evt.Id, action);
+
+                return false;
+            }
+
+            var newTargetTime = isExpedite ? CurrentTime : (evt.NextReadyTime - hurryBy).Value;
+
+            this.EnqueueEvent(evt, ref newTargetTime);
+
+            this.Logger.LogTrace("Event {eventName} with id {eventId} was {action} to {timeTicks}.", evt.GetType().Name, evt.Id, action, newTargetTime.Ticks);
+
+            // Pulse the monitor since we might have added at the beginning of the queue.
+            Monitor.Pulse(this.eventsAvailableLock);
+        }
 
         return true;
     }
