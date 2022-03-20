@@ -9,18 +9,16 @@
 // </copyright>
 // -----------------------------------------------------------------
 
+#pragma warning disable CA1806 // Do not ignore method results
+
 namespace Fibula.EventsEngine.Tests;
 
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
-using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
-using Fibula.EventsEngine.Contracts;
 using Fibula.EventsEngine.Contracts.Abstractions;
-using Fibula.EventsEngine.Contracts.Delegates;
-using Fibula.Utilities.Common.Extensions;
 using Fibula.Utilities.Testing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
@@ -456,3 +454,6 @@ public class EventsReactorTests
         return new EventsReactor(logger, options ?? GoodReactorOptions);
     }
 }
+
+#pragma warning restore CA1806 // Do not ignore method results
+

@@ -178,21 +178,17 @@ public class EventsReactor : IEventsReactor<Event>
     /// <returns>True if the event is successfully expedited, and false otherwise.</returns>
     public bool Expedite(Guid evtId)
     {
-        if (!this.eventsIndex.TryGetValue(evtId, out Event evt))
+        lock (this.eventsAvailableLock)
         {
-            this.Logger.LogTrace("Unable to expedite event: An event with id {eventId} was not found in the index.", evtId);
+            if (!this.eventsIndex.TryGetValue(evtId, out Event evt))
+            {
+                this.Logger.LogTrace("Unable to expedite event: An event with id {eventId} was not found in the index.", evtId);
 
-            return false;
+                return false;
+            }
+
+            return this.Hurry(evt, TimeSpan.MaxValue);
         }
-
-        if (!this.eventNodesIndex.TryGetValue(evtId, out EventsNode evtNode))
-        {
-            this.Logger.LogTrace("A node for event with id {eventId} was not found in the index.", evtId);
-
-            return false;
-        }
-
-        return this.Hurry(evt, TimeSpan.MaxValue);
     }
 
     /// <summary>

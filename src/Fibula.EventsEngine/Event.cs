@@ -12,7 +12,6 @@
 namespace Fibula.EventsEngine;
 
 using System;
-using System.Diagnostics.CodeAnalysis;
 using Fibula.EventsEngine.Contracts.Abstractions;
 using Fibula.EventsEngine.Contracts.Enumerations;
 
