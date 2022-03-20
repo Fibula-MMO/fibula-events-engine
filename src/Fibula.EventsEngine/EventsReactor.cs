@@ -120,7 +120,7 @@ public class EventsReactor : IEventsReactor<Event>
         {
             if (!this.eventsIndex.TryGetValue(evtId, out Event evt))
             {
-                this.Logger.LogTrace("An event with id {eventId} was not found in the index.", evtId);
+                this.Logger.LogTrace("Unable to cancel event: An event with id {eventId} was not found in the index.", evtId);
 
                 return false;
             }
@@ -141,7 +141,7 @@ public class EventsReactor : IEventsReactor<Event>
         {
             if (!this.eventsIndex.TryGetValue(evtId, out Event evt))
             {
-                this.Logger.LogTrace("An event with id {eventId} was not found in the index.", evtId);
+                this.Logger.LogTrace("Unable to delay event: An event with id {eventId} was not found in the index.", evtId);
 
                 return false;
             }
@@ -162,7 +162,7 @@ public class EventsReactor : IEventsReactor<Event>
         {
             if (!this.eventsIndex.TryGetValue(evtId, out Event evt))
             {
-                this.Logger.LogTrace("An event with id {eventId} was not found in the index.", evtId);
+                this.Logger.LogTrace("Unable to hurry event: An event with id {eventId} was not found in the index.", evtId);
 
                 return false;
             }
@@ -180,7 +180,7 @@ public class EventsReactor : IEventsReactor<Event>
     {
         if (!this.eventsIndex.TryGetValue(evtId, out Event evt))
         {
-            this.Logger.LogTrace("An event with id {eventId} was not found in the index.", evtId);
+            this.Logger.LogTrace("Unable to expedite event: An event with id {eventId} was not found in the index.", evtId);
 
             return false;
         }
@@ -260,7 +260,8 @@ public class EventsReactor : IEventsReactor<Event>
                         }
 
                         // Wait until we're flagged that there are events available.
-                        this.Logger.LogTrace("Waiting for events to process...");
+                        var prettyTimeDescription = timeout == maxTimeout ? "indefinitely" : timeout.ToString();
+                        this.Logger.LogTrace("Processor will wait {time}.", prettyTimeDescription);
 
                         Monitor.Wait(this.eventsAvailableLock, timeout);
 
@@ -333,7 +334,7 @@ public class EventsReactor : IEventsReactor<Event>
                   {
                       lock (this.eventsPushedLock)
                       {
-                          this.Logger.LogTrace("Waiting for events to demultiplex...");
+                          this.Logger.LogTrace("Demultiplexor is now waiting for more events.");
 
                           Monitor.Wait(this.eventsPushedLock);
 
